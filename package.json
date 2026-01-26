@@ -1,5 +1,5 @@
 {
-  "name": "nextjs-agent-cli",
+  "name": "@kyawthiha/nextjs-agent-cli",
   "version": "1.0.0",
   "description": "Next.js Fullstack Agent CLI",
   "keywords": ["nextjs", "agent", "ai", "cli", "fullstack"],
