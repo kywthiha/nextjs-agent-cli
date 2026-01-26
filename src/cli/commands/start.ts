@@ -6,23 +6,15 @@ import { logger } from '../../utils/logger.js';
 import { Agent, AgentConfig, AgentTask } from '../../agent/index.js';
 import fs from 'fs/promises';
 
-const GenerateSchema = z.object({
-    prompt: z.string().min(1, "Prompt is required"),
-    projectPath: z.string().min(1, "Project path is required"),
-    maxIterations: z.number().optional().default(100),
-    verbose: z.boolean().optional().default(false),
-});
-
-export const generateCommand = new Command('generate')
-    .description('Generate React/Next.js code from a prompt using AI Agent')
-    .argument('[prompt]', 'The natural language prompt describing the application to build')
+export const startCommand = new Command('start')
+    .description('Start the AI Agent')
     .option('-p, --project-path <path>', 'Path to target project (new or existing)')
     .option('-m, --max-iterations <number>', 'Maximum agent iterations', '100')
     .option('--no-verbose', 'Disable verbose logging')
-    .action(async (promptArg, options) => {
+    .action(async (options) => {
         try {
             // 1. Initial Input Resolution
-            let currentPrompt = promptArg;
+            let currentPrompt: string | undefined;
             let projectPath = options.projectPath;
 
             if (!projectPath) {
@@ -108,7 +100,7 @@ export const generateCommand = new Command('generate')
                     currentPrompt = answer.prompt;
                 }
 
-                if (currentPrompt.toLowerCase() === 'exit') {
+                if (currentPrompt && currentPrompt.toLowerCase() === 'exit') {
                     console.log('Exiting...');
                     break;
                 }

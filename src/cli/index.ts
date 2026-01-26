@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { generateCommand } from './commands/generate.js';
+import { startCommand } from './commands/start.js'
 
 const program = new Command();
 
@@ -9,6 +9,6 @@ program
     .description('Next.js Fullstack Agent CLI')
     .version('1.0.0');
 
-program.addCommand(generateCommand);
+program.addCommand(startCommand);
 
 program.parse();
