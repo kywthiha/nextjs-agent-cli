@@ -1,19 +1,9 @@
 {
-  "name": "@kyawthiha/nextjs-agent-cli",
+  "name": "nextjs-agent-cli",
   "version": "1.0.0",
   "description": "Next.js Fullstack Agent CLI",
   "keywords": ["nextjs", "agent", "ai", "cli", "fullstack"],
-  "publishConfig": {
-    "access": "public"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "type": "module",
-  "bin": {
-    "next-agent": "./dist/cli/index.js"
-  },
   "scripts": {
     "build": "npx rimraf dist && tsc",
     "dev": "npx rimraf dist && tsc && node dist/cli/index.js start",
