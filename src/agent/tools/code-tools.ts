@@ -455,43 +455,114 @@ export const installShadcnComponentsTool: Tool = {
 
 
 /**
- * Tool: Setup Prisma with SQLite
+ * Tool: Setup Prisma with PostgreSQL (Adapter)
  */
 export const setupPrismaTool: Tool = {
     name: 'setup_prisma',
-    description: 'Initialize Prisma ORM with SQLite in a Next.js project. Installs dependencies, initializes Prisma, and sets up the Prisma Client singleton.',
+    description: 'Initialize Prisma ORM with PostgreSQL in a Next.js project. Installs dependencies, initializes Prisma with driver adapter support, sets up the Prisma Client singleton, and updates .env.',
     parameters: {
         type: 'object',
         properties: {
             projectPath: {
                 type: 'string',
                 description: 'The project directory'
+            },
+            databaseUrl: {
+                type: 'string',
+                description: 'The database URL (e.g. postgresql://user:password@localhost:5432/mydb)'
             }
         },
-        required: ['projectPath']
+        required: ['projectPath', 'databaseUrl']
     },
     execute: async (input) => {
         try {
-            const { projectPath } = input;
+            const { projectPath, databaseUrl } = input;
             const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
 
-            // 1. Install dependencies
-            await execAsync('pnpm add -D prisma', { cwd: projectPath, shell });
-            await execAsync('pnpm add @prisma/client', { cwd: projectPath, shell });
+            // Install dependencies
+            // prisma (dev)
+            // @prisma/client, @prisma/adapter-pg, pg, dotenv (prod)
+            await execAsync('pnpm add -D prisma @types/pg', { cwd: projectPath, shell });
+            await execAsync('pnpm add @prisma/client @prisma/adapter-pg dotenv pg', { cwd: projectPath, shell });
 
-            // 2. Initialize Prisma with SQLite
+            // Initialize Prisma with PostgreSQL
             // This creates prisma/schema.prisma and .env
-            await execAsync('npx prisma init --datasource-provider sqlite', { cwd: projectPath, shell });
+            await execAsync('npx prisma init --datasource-provider postgresql', { cwd: projectPath, shell });
 
-            // 3. Create lib/prisma.ts singleton
+            await fs.writeFile(path.join(projectPath, '.env'), `DATABASE_URL=${databaseUrl}`);
+
+            // Auto-create Database (pg)
+            // We create a temporary script to check and create the database if it doesn't exist
+            // This is safer than 'prisma migrate' for just creation as it doesn't require schema changes yet
+            const createDbScript = `
+import { Client } from 'pg';
+import 'dotenv/config';
+
+async function main() {
+    try {
+        const url = process.env.DATABASE_URL;
+        if (!url) {
+            console.error('DATABASE_URL not found');
+            process.exit(1);
+        }
+
+        const dbUrl = new URL(url);
+        const dbName = dbUrl.pathname.substring(1); 
+        
+        // Connect to 'postgres' database to check/create target db
+        dbUrl.pathname = 'postgres';
+        const postgresUrl = dbUrl.toString();
+
+        const client = new Client({ connectionString: postgresUrl });
+        await client.connect();
+
+        const checkRes = await client.query("SELECT 1 FROM pg_database WHERE datname=$1", [dbName]);
+        if (checkRes.rowCount === 0) {
+            console.log("Creating database " + dbName);
+            await client.query('CREATE DATABASE "' + dbName + '"');
+            console.log("Database created successfully");
+        } else {
+            console.log("Database " + dbName + " already exists");
+        }
+        await client.end();
+    } catch (e: any) {
+        // Don't fail the whole process if DB creation fails (e.g. permission issues or already exists in a way we couldn't detect)
+        console.error("Warning: Could not auto-create DB:", e.message);
+    }
+}
+main();
+`;
+            await fs.writeFile(path.join(projectPath, 'create-db.ts'), createDbScript);
+
+            try {
+                // Run the script with tsx
+                await execAsync('npx tsx create-db.ts', { cwd: projectPath, shell });
+            } catch (e) {
+                // Ignore execution errors, proceed to next steps
+            }
+            // Cleanup
+            await fs.unlink(path.join(projectPath, 'create-db.ts')).catch(() => { });
+
+            // Create src/lib/prisma.ts singleton
             const libDir = path.join(projectPath, 'src', 'lib');
             await fs.mkdir(libDir, { recursive: true });
 
-            const prismaClientContent = `import { PrismaClient } from '@prisma/client';
+            const prismaClientContent = `import "dotenv/config";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from '@prisma/adapter-pg'
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const globalForPrisma = global as unknown as {
+    prisma: PrismaClient
+}
 
-export const prisma = globalForPrisma.prisma || new PrismaClient();
+const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL as string,
+})
+
+const prisma = globalForPrisma.prisma || new PrismaClient({
+    adapter,
+})
+
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
@@ -499,14 +570,35 @@ export default prisma;
 `;
             await fs.writeFile(path.join(libDir, 'prisma.ts'), prismaClientContent);
 
-            return `Prisma initialized with SQLite.
-1. Installed prisma and @prisma/client
-2. Initialized prisma/schema.prisma (SQLite)
-3. Created src/lib/prisma.ts singleton
+            // Create prisma/seed.ts template
+            const seedContent = `import prisma from '../src/lib/prisma';
 
-Next steps:
-- Define your models in prisma/schema.prisma
-- Run 'npx prisma migrate dev --name init' to create the database`;
+async function main() {
+  // Seed data here
+    console.log('Seeding...');
+}
+
+main();
+`;
+            await fs.writeFile(path.join(projectPath, 'prisma', 'seed.ts'), seedContent);
+
+            // Generate Client (crucial so imports work)
+            await execAsync('npx prisma generate', { cwd: projectPath, shell });
+
+            return `Prisma initialized with PostgreSQL and Driver Adapter.
+1. Installed: prisma, @prisma/client, @prisma/adapter-pg, pg, dotenv, @types/pg
+2. Initialized: prisma/schema.prisma (with custom output to generated/prisma/client)
+3. Configured: .env with DATABASE_URL
+4. Check/Create DB: Auto-created database if missing
+5. Created: src/lib/prisma.ts (Singleton with Adapter)
+6. Created: prisma/seed.ts
+7. Generated: Prisma Client
+
+Next Steps:
+- Define models in 'prisma/schema.prisma'
+- Run 'npx prisma migrate dev --name init' to apply migrations.
+- Run 'npx prisma generate' to generate the client (must run after schema changes)
+`;
         } catch (error: any) {
             return `Error setting up Prisma: ${error.message}\n${error.stderr || ''}`;
         }
@@ -618,8 +710,17 @@ export const verifyProjectTool: Tool = {
                     const testModel = modelMatch ? modelMatch[1] : null;
 
                     const testCode = `
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from '@prisma/adapter-pg'
+import 'dotenv/config'
+
+const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+})
+
+const prisma = new PrismaClient({
+    adapter,
+});
 
 async function main() {
     console.log('Testing DB connection...');

@@ -70,4 +70,5 @@ export interface AgentConfig {
 export interface AgentTask {
     prompt: string;
     projectPath: string;
+    databaseUrl?: string;
 }

@@ -120,18 +120,19 @@ export class Agent {
     async start(task: AgentTask): Promise<void> {
         if (!this.isInitialized) await this.init();
 
-        const { prompt, projectPath } = task;
+        const { prompt, projectPath, databaseUrl } = task;
         this.activeProjectPath = projectPath;
 
         logger.step('Starting Full Stack Agent');
         logger.info(`Goal: ${prompt}`);
         logger.info(`Output: ${projectPath}`);
+        if (databaseUrl) logger.info(`Context: DB URL provided`);
 
         // Phase 1: Planning
         logger.step('Phase 1: Planning & Setup');
 
         // Initial setup prompt
-        const setupPrompt = createTaskPrompt(prompt, projectPath);
+        const setupPrompt = createTaskPrompt(prompt, projectPath, databaseUrl);
 
         this.conversation = [{
             role: 'user',

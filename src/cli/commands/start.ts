@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { logger } from '../../utils/logger.js';
 import { Agent, AgentConfig, AgentTask } from '../../agent/index.js';
 import fs from 'fs/promises';
+import path from 'path';
 
 export const startCommand = new Command('start')
     .description('Start the AI Agent')
@@ -78,6 +79,45 @@ export const startCommand = new Command('start')
                 default: 'gemini-3-flash-preview'
             }]);
 
+            // Database Creds (Step-by-Step)
+            const defaultDbName = path.basename(projectPath || 'my-app');
+            console.log('\n--- PostgreSQL Configuration ---');
+
+            const dbCreds = await inquirer.prompt([
+                {
+                    type: 'input',
+                    name: 'host',
+                    message: 'Host:',
+                    default: 'localhost'
+                },
+                {
+                    type: 'input',
+                    name: 'port',
+                    message: 'Port:',
+                    default: '5432'
+                },
+                {
+                    type: 'input',
+                    name: 'username',
+                    message: 'Username:',
+                    default: 'postgres'
+                },
+                {
+                    type: 'input', // Using input so user can see/edit default easily
+                    name: 'password',
+                    message: 'Password:',
+                    default: 'postgres'
+                },
+                {
+                    type: 'input',
+                    name: 'dbName',
+                    message: 'Database Name:',
+                    default: defaultDbName
+                }
+            ]);
+
+            const databaseUrl = `postgresql://${dbCreds.username}:${dbCreds.password}@${dbCreds.host}:${dbCreds.port}/${dbCreds.dbName}`;
+
             const config: AgentConfig = {
                 geminiApiKey: geminiKey,
                 maxIterations: maxIterations,
@@ -123,7 +163,8 @@ export const startCommand = new Command('start')
                     if (iteration === 1) {
                         const task: AgentTask = {
                             prompt: enhancedPrompt,
-                            projectPath: projectPath
+                            projectPath: projectPath,
+                            databaseUrl: databaseUrl
                         };
                         await agent.start(task);
                     } else {
