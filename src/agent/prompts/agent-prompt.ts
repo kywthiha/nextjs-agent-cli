@@ -1,5 +1,5 @@
 /**
- * System prompt for the Figma-to-Next.js AI Agent
+ * System prompt for the Next.js AI Agent
  * Follows Next.js App Router best practices with SSR and TypeScript
  */
 
