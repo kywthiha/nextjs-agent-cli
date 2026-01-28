@@ -1,5 +1,5 @@
 /**
- * Core AI Agent - Autonomous Figma to React converter
+ * Core AI Agent
  * 
  * This agent uses an agentic loop pattern:
  * 1. Send task + tools to AI
