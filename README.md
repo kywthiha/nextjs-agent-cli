@@ -1,113 +1,89 @@
-Next.js Fullstack Agent CLI
+# Next.js Fullstack Agent CLI
 
 Gemini 3 Hackathon Entry 2026
 
-Gemini Next.js Agent CLI is an autonomous, tool-driven developer agent that transforms natural language into verified, production-ready Next.js fullstack applications.
+**Gemini Next.js Agent CLI** is an autonomous, tool-driven developer agent that transforms natural language into verified, production-ready Next.js fullstack applications.
 
 The agent plans tasks, executes real commands, verifies results, attempts repairs, and asks for manual input only when automation is unsafe.
 
-
 ---
 
-Overview
+## Overview
 
 This CLI is designed to behave like a real developer inside a real project environment.
 
 Instead of only generating code, the agent:
-
-Creates and modifies files directly
-
-Runs installs and builds
-
-Verifies results through execution
-
-Attempts automated fixes when failures occur
-
-Pauses for human input when decisions require clarity
-
+- Creates and modifies files directly
+- Runs installs and builds
+- Verifies results through execution
+- Attempts automated fixes when failures occur
+- Pauses for human input when decisions require clarity
 
 The focus is reliability, correctness, and real execution.
 
+---
+
+## Features
+
+- Runtime: Node.js
+- Language: TypeScript
+- CLI Framework: Commander, Inquirer
+- Agent: Gemini-powered agentic workflow
+- Planning before execution
+- Real filesystem operations
+- Build and runtime verification
+- Targeted self-repair for failures
 
 ---
 
-Features
-
-Runtime: Node.js
-
-Language: TypeScript
-
-CLI Framework: Commander, Inquirer
-
-Agent: Gemini-powered agentic workflow
-
-Planning before execution
-
-Real filesystem operations
-
-Build and runtime verification
-
-Targeted self-repair for failures
-
-
-
----
-
-Requirements
+## Requirements
 
 Before installing, ensure you have:
 
-Node.js 18 or later
-
-npm or pnpm
-
-PostgreSQL (optional, only required if your project uses a database)
-
-A Gemini API key
-
-
+- Node.js 18 or later
+- npm or pnpm
+- PostgreSQL (optional, only required if your project uses a database)
+- A Gemini API key
 
 ---
 
-Installation (Step by Step)
+## Installation (Step by Step)
 
 1. Clone the repository
-
-
-
+```bash
 git clone https://github.com/kywthiha/nextjs-agent-cli.git
-
+```
 2. Move into the project directory
 
 
-
+```bash
 cd nextjs-agent-cli
-
+```
 3. Install dependencies
 
 
-
+```bash
 npm install
-
+```
 4. Configure environment variables
 
 
-
+```bash
 cp .env.example .env
-
+```
 Add your Gemini API key to the .env file:
-
+```bash
 GEMINI_API_KEY=your_api_key_here
 
-
+```
 ---
 
 Running the CLI
 
 Start the CLI in development mode:
-
+```bash
 npm run dev
-
+```
 The agent will launch an interactive session in your terminal.
 
 
@@ -128,9 +104,9 @@ Choose where the Next.js project should be created.
 
 Select the Gemini model for the agent.
 
-gemini-3-flash-preview (faster, lightweight tasks)
+gemini-3-flash-preview
 
-gemini-3-pro-preview (complex reasoning and large projects)
+gemini-3-pro-preview
 
 
 
@@ -183,7 +159,7 @@ Attempt fixes if errors occur
 
 Testing and Verification
 
-Verification is part of the agent’s workflow.
+Verification is a core part of the agent’s workflow.
 
 During execution, the agent may:
 
