@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { startCommand } from './commands/start.js'
+import { startCommand } from './commands/start.js';
+import { configCommand } from './commands/config.js';
 
 const program = new Command();
 
@@ -10,5 +11,6 @@ program
     .version('1.0.0');
 
 program.addCommand(startCommand);
+program.addCommand(configCommand);
 
 program.parse();

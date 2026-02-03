@@ -8,67 +8,9 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import type { Tool } from '../types.js';
-import Fuse from 'fuse.js';
 
 const execAsync = promisify(exec);
 
-/**
- * Tool: Run shell command
- */
-export const runCommandTool: Tool = {
-    name: 'run_command',
-    description: 'Execute a shell command in the specified working directory. Returns stdout and stderr. Use this for npm/pnpm commands, git, etc.',
-    parameters: {
-        type: 'object',
-        properties: {
-            command: {
-                type: 'string',
-                description: 'The command to execute'
-            },
-            cwd: {
-                type: 'string',
-                description: 'The working directory to run the command in'
-            }
-        },
-        required: ['command', 'cwd']
-    },
-    execute: async (input) => {
-        try {
-            // Ensure the directory exists
-            await fs.mkdir(input.cwd, { recursive: true });
-
-            const { stdout, stderr } = await execAsync(input.command, {
-                cwd: input.cwd,
-                timeout: 180000, // 3 minute timeout for installs
-                maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-                shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash'
-            });
-
-            let result = '';
-            if (stdout) {
-                result += `stdout:\n${stdout}\n`;
-            }
-            if (stderr) {
-                result += `stderr:\n${stderr}`;
-            }
-            if (!result) {
-                result = 'Command completed successfully (no output)';
-            }
-
-            // Truncate very long outputs
-            if (result.length > 5000) {
-                result = result.substring(0, 5000) + '\n... (output truncated)';
-            }
-
-            return result;
-        } catch (error: any) {
-            const message = error.message || 'Unknown error';
-            const stdout = error.stdout || '';
-            const stderr = error.stderr || '';
-            return `Command failed: ${message}\nstdout: ${stdout}\nstderr: ${stderr}`;
-        }
-    }
-};
 
 /**
  * Tool: Create Next.js project with TypeScript + Tailwind + App Router
@@ -178,138 +120,7 @@ export const installPackagesTool: Tool = {
     }
 };
 
-/**
- * Tool: Fuzzy search code patterns
- */
-export const searchCodeTool: Tool = {
-    name: 'search_code',
-    description: 'Search for text patterns in files using fuzzy/similar matching. Returns matching lines with file paths and line numbers.',
-    parameters: {
-        type: 'object',
-        properties: {
-            pattern: {
-                type: 'string',
-                description: 'The text pattern to search for (supports partial/fuzzy matching)'
-            },
-            directory: {
-                type: 'string',
-                description: 'The directory to search in'
-            },
-            fileExtension: {
-                type: 'string',
-                description: 'Optional file extension to filter (e.g., "ts", "tsx", "js")'
-            },
-            fuzzy: {
-                type: 'string',
-                description: 'Set to "true" for fuzzy matching (default: exact)',
-                enum: ['true', 'false']
-            }
-        },
-        required: ['pattern', 'directory']
-    },
-    execute: async (input) => {
-        try {
-            const searchDir = input.directory;
-            const pattern = input.pattern;
-            const extension = input.fileExtension ? `.${input.fileExtension}` : null;
-            const isFuzzy = input.fuzzy === 'true';
 
-            // Define search item structure
-            type SearchItem = {
-                relativePath: string;
-                lineNumber: number;
-                content: string;
-            };
-
-            const allLines: SearchItem[] = [];
-
-            const walk = async (dir: string) => {
-                try {
-                    const entries = await fs.readdir(dir, { withFileTypes: true });
-                    for (const entry of entries) {
-                        // Skip node_modules, hidden directories, and dist
-                        if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') {
-                            continue;
-                        }
-
-                        const fullPath = path.join(dir, entry.name);
-
-                        if (entry.isDirectory()) {
-                            await walk(fullPath);
-                        } else if (!extension || entry.name.endsWith(extension)) {
-                            try {
-                                const content = await fs.readFile(fullPath, 'utf-8');
-                                const lines = content.split('\n');
-                                const relativePath = path.relative(searchDir, fullPath);
-
-                                lines.forEach((line, idx) => {
-                                    if (line.trim().length > 0) { // Skip empty lines
-                                        allLines.push({
-                                            relativePath,
-                                            lineNumber: idx + 1,
-                                            content: line.trim()
-                                        });
-                                    }
-                                });
-                            } catch {
-                                // Skip files that can't be read
-                            }
-                        }
-                    }
-                } catch {
-                    // Skip directories that can't be read
-                }
-            };
-
-            await walk(searchDir);
-
-            if (allLines.length === 0) {
-                return `No files found to search in "${searchDir}"`;
-            }
-
-            let results: SearchItem[] = [];
-
-            if (isFuzzy) {
-                // Configure Fuse.js
-                const fuse = new Fuse(allLines, {
-                    keys: ['content'],
-                    includeScore: true,
-                    threshold: 0.4, // 0.0 = exact, 1.0 = match anything. 0.4 is good for fuzzy.
-                    ignoreLocation: true, // Search anywhere in the string
-                    minMatchCharLength: 3
-                });
-
-                const fuseResults = fuse.search(pattern);
-                // Extract items from Fuse results
-                results = fuseResults.map(res => res.item);
-            } else {
-                // Exact match (case insensitive)
-                const lowerPattern = pattern.toLowerCase();
-                results = allLines.filter(item =>
-                    item.content.toLowerCase().includes(lowerPattern)
-                );
-            }
-
-            if (results.length === 0) {
-                return `No matches found for "${pattern}"${isFuzzy ? ' (fuzzy)' : ''}`;
-            }
-
-            // Limit results to top 50
-            const displayResults = results.slice(0, 50);
-            const output = displayResults
-                .map(item => `${item.relativePath}:${item.lineNumber}: ${item.content}`)
-                .join('\n');
-
-            if (results.length > 50) {
-                return output + `\n... (showing 50 of ${results.length} matches)`;
-            }
-
-            return output;
-        } catch (error: any) {
-            return `Error searching code: ${error.message}`;
-        }
-    }
-};
 
 /**
  * Tool: Check TypeScript errors
@@ -455,11 +266,11 @@ export const installShadcnComponentsTool: Tool = {
 
 
 /**
- * Tool: Setup Prisma with PostgreSQL (Adapter)
+ * Tool: Setup Prisma 7 with PostgreSQL (Driver Adapter)
  */
 export const setupPrismaTool: Tool = {
     name: 'setup_prisma',
-    description: 'Initialize Prisma ORM with PostgreSQL in a Next.js project. Installs dependencies, initializes Prisma with driver adapter support, sets up the Prisma Client singleton, and updates .env.',
+    description: 'Initialize Prisma 7 ORM with PostgreSQL in a Next.js project. Uses the new prisma-client provider with driver adapters. Creates prisma.config.ts, schema.prisma with output field, and lib/prisma.ts singleton.',
     parameters: {
         type: 'object',
         properties: {
@@ -479,21 +290,160 @@ export const setupPrismaTool: Tool = {
             const { projectPath, databaseUrl } = input;
             const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
 
-            // Install dependencies
-            // prisma (dev)
-            // @prisma/client, @prisma/adapter-pg, pg, dotenv (prod)
-            await execAsync('pnpm add -D prisma @types/pg', { cwd: projectPath, shell });
+            // Step 1: Install Prisma 7 dependencies
+            await execAsync('pnpm add -D prisma tsx @types/pg', { cwd: projectPath, shell });
             await execAsync('pnpm add @prisma/client @prisma/adapter-pg dotenv pg', { cwd: projectPath, shell });
 
-            // Initialize Prisma with PostgreSQL
-            // This creates prisma/schema.prisma and .env
-            await execAsync('npx prisma init --datasource-provider postgresql', { cwd: projectPath, shell });
+            // Step 2: Create prisma directory
+            const prismaDir = path.join(projectPath, 'prisma');
+            await fs.mkdir(prismaDir, { recursive: true });
 
-            await fs.writeFile(path.join(projectPath, '.env'), `DATABASE_URL=${databaseUrl}`);
+            // Step 3: Create .env file with DATABASE_URL
+            await fs.writeFile(path.join(projectPath, '.env'), `DATABASE_URL="${databaseUrl}"\n`);
 
-            // Auto-create Database (pg)
-            // We create a temporary script to check and create the database if it doesn't exist
-            // This is safer than 'prisma migrate' for just creation as it doesn't require schema changes yet
+            // Step 4: Create prisma/schema.prisma (Prisma 7 syntax)
+            const schemaContent = `// Prisma 7 Schema
+// Documentation: https://www.prisma.io/docs/guides/nextjs
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Example models - customize as needed
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  posts     Post[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  Int      @map("author_id")
+  author    User     @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("posts")
+}
+`;
+            await fs.writeFile(path.join(prismaDir, 'schema.prisma'), schemaContent);
+
+            // Step 5: Create prisma.config.ts at project root (Prisma 7 requirement)
+            const prismaConfigContent = `import 'dotenv/config'
+import { defineConfig, env } from 'prisma/config';
+
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  migrations: {
+    path: 'prisma/migrations',
+    seed: 'tsx prisma/seed.ts',
+  },
+  datasource: {
+    url: env('DATABASE_URL'),
+  },
+});
+`;
+            await fs.writeFile(path.join(projectPath, 'prisma.config.ts'), prismaConfigContent);
+
+            // Step 6: Create src/lib/prisma.ts singleton with driver adapter (Prisma 7)
+            const libDir = path.join(projectPath, 'src', 'lib');
+            await fs.mkdir(libDir, { recursive: true });
+
+            const prismaClientContent = `// Prisma 7 Client with Driver Adapter
+// Import from generated path (NOT @prisma/client)
+import { PrismaClient } from '../generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+
+const globalForPrisma = global as unknown as {
+  prisma: PrismaClient
+}
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+})
+
+const prisma = globalForPrisma.prisma || new PrismaClient({
+  adapter,
+})
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+
+export default prisma
+`;
+            await fs.writeFile(path.join(libDir, 'prisma.ts'), prismaClientContent);
+
+            // Step 7: Create prisma/seed.ts template (Prisma 7)
+            const seedContent = `// Prisma 7 Seed Script
+// Run with: npx prisma db seed
+import { PrismaClient, Prisma } from "../src/generated/prisma/client";
+import { PrismaPg } from '@prisma/adapter-pg'
+import 'dotenv/config'
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+})
+
+const prisma = new PrismaClient({
+  adapter,
+});
+
+const userData: Prisma.UserCreateInput[] = [
+  {
+    name: "Admin User",
+    email: "admin@example.com",
+    posts: {
+      create: [
+        { title: "Welcome Post", content: "Hello World!", published: true },
+        { title: "Draft Post", content: "Work in progress...", published: false },
+      ],
+    },
+  },
+];
+
+export async function main() {
+  console.log('Seeding database...');
+  
+  // Clean existing data
+  await prisma.post.deleteMany();
+  await prisma.user.deleteMany();
+  
+  // Create seed data
+  for (const u of userData) {
+    const user = await prisma.user.create({ data: u });
+    console.log(\`Created user: \${user.email}\`);
+  }
+  
+  console.log('Seeding completed!');
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+`;
+            await fs.writeFile(path.join(prismaDir, 'seed.ts'), seedContent);
+
+            // Step 8: Create src/generated/prisma directory for output
+            const generatedDir = path.join(projectPath, 'src', 'generated', 'prisma');
+            await fs.mkdir(generatedDir, { recursive: true });
+
+            // Step 9: Auto-create Database (optional, may fail if DB exists)
             const createDbScript = `
 import { Client } from 'pg';
 import 'dotenv/config';
@@ -509,7 +459,6 @@ async function main() {
         const dbUrl = new URL(url);
         const dbName = dbUrl.pathname.substring(1); 
         
-        // Connect to 'postgres' database to check/create target db
         dbUrl.pathname = 'postgres';
         const postgresUrl = dbUrl.toString();
 
@@ -526,7 +475,6 @@ async function main() {
         }
         await client.end();
     } catch (e: any) {
-        // Don't fail the whole process if DB creation fails (e.g. permission issues or already exists in a way we couldn't detect)
         console.error("Warning: Could not auto-create DB:", e.message);
     }
 }
@@ -535,69 +483,37 @@ main();
             await fs.writeFile(path.join(projectPath, 'create-db.ts'), createDbScript);
 
             try {
-                // Run the script with tsx
                 await execAsync('npx tsx create-db.ts', { cwd: projectPath, shell });
-            } catch (e) {
-                // Ignore execution errors, proceed to next steps
+            } catch {
+                // Ignore errors - DB might already exist
             }
-            // Cleanup
             await fs.unlink(path.join(projectPath, 'create-db.ts')).catch(() => { });
 
-            // Create src/lib/prisma.ts singleton
-            const libDir = path.join(projectPath, 'src', 'lib');
-            await fs.mkdir(libDir, { recursive: true });
+            // Step 10: Generate Prisma Client
+            try {
+                await execAsync('npx prisma generate', { cwd: projectPath, shell });
+            } catch {
+                // May fail if schema has issues - user will fix
+            }
 
-            const prismaClientContent = `import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from '@prisma/adapter-pg'
+            return `✅ Prisma 7 initialized with PostgreSQL and Driver Adapter.
 
-const globalForPrisma = global as unknown as {
-    prisma: PrismaClient
-}
+Files created:
+1. prisma/schema.prisma (provider: "prisma-client", output: "../src/generated/prisma")
+2. prisma.config.ts (Prisma 7 CLI config at project root)
+3. src/lib/prisma.ts (singleton with @prisma/adapter-pg)
+4. prisma/seed.ts (seed script template)
+5. .env (DATABASE_URL configured)
 
-const adapter = new PrismaPg({
-    connectionString: process.env.DATABASE_URL as string,
-})
+Dependencies installed:
+- prisma, tsx, @types/pg (dev)
+- @prisma/client, @prisma/adapter-pg, pg, dotenv
 
-const prisma = globalForPrisma.prisma || new PrismaClient({
-    adapter,
-})
-
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
-
-export default prisma;
-`;
-            await fs.writeFile(path.join(libDir, 'prisma.ts'), prismaClientContent);
-
-            // Create prisma/seed.ts template
-            const seedContent = `import prisma from '../src/lib/prisma';
-
-async function main() {
-  // Seed data here
-    console.log('Seeding...');
-}
-
-main();
-`;
-            await fs.writeFile(path.join(projectPath, 'prisma', 'seed.ts'), seedContent);
-
-            // Generate Client (crucial so imports work)
-            await execAsync('npx prisma generate', { cwd: projectPath, shell });
-
-            return `Prisma initialized with PostgreSQL and Driver Adapter.
-1. Installed: prisma, @prisma/client, @prisma/adapter-pg, pg, dotenv, @types/pg
-2. Initialized: prisma/schema.prisma (with custom output to generated/prisma/client)
-3. Configured: .env with DATABASE_URL
-4. Check/Create DB: Auto-created database if missing
-5. Created: src/lib/prisma.ts (Singleton with Adapter)
-6. Created: prisma/seed.ts
-7. Generated: Prisma Client
-
-Next Steps:
-- Define models in 'prisma/schema.prisma'
-- Run 'npx prisma migrate dev --name init' to apply migrations.
-- Run 'npx prisma generate' to generate the client (must run after schema changes)
+IMPORTANT - Next Steps (in order):
+1. Customize models in 'prisma/schema.prisma'
+2. Run: npx prisma generate
+3. Run: npx prisma migrate dev --name init
+4. Run: npx prisma db seed (seeding is NOT automatic in Prisma 7)
 `;
         } catch (error: any) {
             return `Error setting up Prisma: ${error.message}\n${error.stderr || ''}`;
@@ -607,11 +523,52 @@ Next Steps:
 
 
 /**
+ * Verification result types for structured AI output
+ */
+interface VerificationCheck {
+    name: string;
+    status: 'pass' | 'fail' | 'warn' | 'skip';
+    message: string;
+    filePath?: string;
+    fixCommand?: string;
+    fixTool?: string;
+    details?: string;
+}
+
+interface VerificationResult {
+    success: boolean;
+    projectPath: string;
+    summary: {
+        total: number;
+        passed: number;
+        failed: number;
+        warnings: number;
+        skipped: number;
+    };
+    checks: VerificationCheck[];
+    fixesApplied: string[];
+    suggestedFixes: Array<{
+        issue: string;
+        command?: string;
+        tool?: string;
+        description: string;
+    }>;
+}
+
+/**
  * Tool: Verify Project & Auto-fix
+ * Outputs structured JSON for AI to parse and take action
  */
 export const verifyProjectTool: Tool = {
     name: 'verify_project',
-    description: 'Verify project setup (Next.js, Shadcn, Prisma) by running build and integration tests. Can optionally auto-fix configuration issues.',
+    description: `Verify project setup (Next.js, Shadcn, Prisma) by running build and integration tests. 
+Returns structured JSON with:
+- success: boolean indicating overall status
+- checks: array of individual check results with status (pass/fail/warn/skip)
+- suggestedFixes: actionable fixes with commands and tool names
+- summary: counts of passed/failed/warnings
+
+Use this output to determine next actions. Each failed check includes fixCommand or fixTool for remediation.`,
     parameters: {
         type: 'object',
         properties: {
@@ -628,19 +585,42 @@ export const verifyProjectTool: Tool = {
                 type: 'string',
                 description: 'Set to "true" to skip the build step (which can be slow)',
                 enum: ['true', 'false']
+            },
+            skipPrismaTest: {
+                type: 'string',
+                description: 'Set to "true" to skip Prisma integration test (useful when DB is not available)',
+                enum: ['true', 'false']
             }
         },
         required: ['projectPath']
     },
     execute: async (input) => {
+        const result: VerificationResult = {
+            success: true,
+            projectPath: input.projectPath,
+            summary: { total: 0, passed: 0, failed: 0, warnings: 0, skipped: 0 },
+            checks: [],
+            fixesApplied: [],
+            suggestedFixes: []
+        };
+
+        const addCheck = (check: VerificationCheck) => {
+            result.checks.push(check);
+            result.summary.total++;
+            switch (check.status) {
+                case 'pass': result.summary.passed++; break;
+                case 'fail': result.summary.failed++; result.success = false; break;
+                case 'warn': result.summary.warnings++; break;
+                case 'skip': result.summary.skipped++; break;
+            }
+        };
+
         try {
             const { projectPath } = input;
             const autoFix = input.autoFix === 'true';
-            const log: string[] = [];
-            const fixes: string[] = [];
             const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
 
-            const checkFile = async (filePath: string) => {
+            const checkFile = async (filePath: string): Promise<boolean> => {
                 try {
                     await fs.access(path.join(projectPath, filePath));
                     return true;
@@ -650,25 +630,72 @@ export const verifyProjectTool: Tool = {
             };
 
             // 1. Verify Project Root (package.json)
-            if (await checkFile('package.json')) {
-                log.push('✅ Next.js project found (package.json)');
+            const hasPackageJson = await checkFile('package.json');
+            if (hasPackageJson) {
+                addCheck({
+                    name: 'project_root',
+                    status: 'pass',
+                    message: 'Valid Node.js project found',
+                    filePath: 'package.json'
+                });
             } else {
-                return '❌ Error: Not a valid node project (package.json missing). Cannot verify.';
+                addCheck({
+                    name: 'project_root',
+                    status: 'fail',
+                    message: 'Not a valid Node.js project - package.json missing',
+                    filePath: 'package.json',
+                    fixCommand: 'pnpm init'
+                });
+                result.suggestedFixes.push({
+                    issue: 'Missing package.json',
+                    command: 'pnpm init',
+                    description: 'Initialize a new Node.js project'
+                });
+                return JSON.stringify(result, null, 2);
             }
 
             // 2. Verify Shadcn UI
             const hasComponentsJson = await checkFile('components.json');
-            const hasUtils = await checkFile('src/lib/utils.ts') || await checkFile('lib/utils.ts');
+            const hasUtilsSrc = await checkFile('src/lib/utils.ts');
+            const hasUtilsRoot = await checkFile('lib/utils.ts');
+            const hasUtils = hasUtilsSrc || hasUtilsRoot;
 
             if (hasComponentsJson && hasUtils) {
-                log.push('✅ Shadcn/UI configured');
+                addCheck({
+                    name: 'shadcn_ui',
+                    status: 'pass',
+                    message: 'Shadcn/UI properly configured',
+                    filePath: 'components.json'
+                });
             } else {
-                log.push('❌ Shadcn/UI configuration missing or incomplete');
+                const missingFiles: string[] = [];
+                if (!hasComponentsJson) missingFiles.push('components.json');
+                if (!hasUtils) missingFiles.push('src/lib/utils.ts');
+
+                addCheck({
+                    name: 'shadcn_ui',
+                    status: 'fail',
+                    message: `Shadcn/UI configuration incomplete - missing: ${missingFiles.join(', ')}`,
+                    filePath: missingFiles[0],
+                    fixTool: 'setup_shadcn_ui',
+                    fixCommand: 'pnpm dlx shadcn@latest init -d'
+                });
+
+                result.suggestedFixes.push({
+                    issue: 'Shadcn/UI not configured',
+                    tool: 'setup_shadcn_ui',
+                    command: 'pnpm dlx shadcn@latest init -d',
+                    description: 'Initialize Shadcn/UI with default configuration'
+                });
+
                 if (autoFix) {
-                    log.push('  🔄 Attempting to fix Shadcn/UI...');
-                    const res = await setupShadcnTool.execute({ projectPath });
-                    fixes.push(`Shadcn Fix: ${res}`);
-                    await installShadcnComponentsTool.execute({ projectPath });
+                    try {
+                        await setupShadcnTool.execute({ projectPath });
+                        await installShadcnComponentsTool.execute({ projectPath });
+                        result.fixesApplied.push('Shadcn/UI initialized and components installed');
+                    } catch (e: any) {
+                        result.fixesApplied.push(`Shadcn/UI fix attempted but failed: ${e.message}`);
+                    }
                 }
             }
 
@@ -678,29 +705,55 @@ export const verifyProjectTool: Tool = {
             let prismaReady = false;
 
             if (hasSchema && hasPrismaClient) {
-                log.push('✅ Prisma configured (files present)');
+                addCheck({
+                    name: 'prisma_config',
+                    status: 'pass',
+                    message: 'Prisma configuration files present',
+                    filePath: 'prisma/schema.prisma'
+                });
                 prismaReady = true;
             } else {
-                log.push('❌ Prisma configuration missing');
+                const missingFiles: string[] = [];
+                if (!hasSchema) missingFiles.push('prisma/schema.prisma');
+                if (!hasPrismaClient) missingFiles.push('src/lib/prisma.ts');
+
+                addCheck({
+                    name: 'prisma_config',
+                    status: 'fail',
+                    message: `Prisma configuration missing: ${missingFiles.join(', ')}`,
+                    filePath: missingFiles[0],
+                    fixTool: 'setup_prisma'
+                });
+
+                result.suggestedFixes.push({
+                    issue: 'Prisma not configured',
+                    tool: 'setup_prisma',
+                    description: 'Initialize Prisma with PostgreSQL - requires DATABASE_URL parameter'
+                });
+
                 if (autoFix) {
-                    log.push('  🔄 Attempting to fix Prisma...');
-                    const res = await setupPrismaTool.execute({ projectPath });
-                    fixes.push(`Prisma Fix: ${res}`);
-                    prismaReady = true;
+                    try {
+                        const res = await setupPrismaTool.execute({ projectPath });
+                        result.fixesApplied.push(`Prisma setup: ${res}`);
+                        prismaReady = true;
+                    } catch (e: any) {
+                        result.fixesApplied.push(`Prisma fix failed: ${e.message}`);
+                    }
                 }
             }
 
-            // 4. Prisma Integration Test (Real Verify)
-            if (prismaReady) {
-                log.push('🔄 Running Prisma Integration Test...');
+            // 4. Prisma Integration Test
+            if (input.skipPrismaTest === 'true') {
+                addCheck({
+                    name: 'prisma_integration',
+                    status: 'skip',
+                    message: 'Prisma integration test skipped by user'
+                });
+            } else if (prismaReady) {
                 try {
-                    // Ensure client is generated
-                    await execAsync('npx prisma generate', { cwd: projectPath, shell });
+                    await execAsync('npx prisma generate', { cwd: projectPath, shell, timeout: 60000 });
 
-                    // Create test script
                     const testScriptPath = path.join(projectPath, 'verify-db-temp.ts');
-
-                    // Check for models in schema to test
                     let schemaContent = '';
                     try {
                         schemaContent = await fs.readFile(path.join(projectPath, 'prisma/schema.prisma'), 'utf-8');
@@ -709,108 +762,373 @@ export const verifyProjectTool: Tool = {
                     const modelMatch = schemaContent.match(/model\s+(\w+)\s+{/);
                     const testModel = modelMatch ? modelMatch[1] : null;
 
+                    // Determine correct import path for prisma client
+                    const prismaImportPath = hasPrismaClient
+                        ? (await checkFile('src/lib/prisma.ts') ? './src/lib/prisma' : './lib/prisma')
+                        : './src/lib/prisma';
+
                     const testCode = `
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from '@prisma/adapter-pg'
-import 'dotenv/config'
-
-const adapter = new PrismaPg({
-    connectionString: process.env.DATABASE_URL,
-})
-
-const prisma = new PrismaClient({
-    adapter,
-});
+import prisma from "${prismaImportPath}";
 
 async function main() {
-    console.log('Testing DB connection...');
     await prisma.$connect();
-    console.log('✅ DB Connected');
-    
-    // Test simple query
-    try {
-        await prisma.$queryRaw\`SELECT 1\`;
-        console.log('✅ Raw Query execution successful');
-    } catch (e) {
-        // SQLite might behave differently or if raw query fails
-        console.log('⚠️ Raw query check skipped/failed: ' + e.message);
-    }
-
-    ${testModel ? `
-    // Test Model Access: ${testModel}
-    try {
-        const count = await prisma.${testModel.toLowerCase()}.count();
-        console.log('✅ Model access successful (${testModel} count: ' + count + ')');
-    } catch (e) {
-        console.error('❌ Model access failed: ' + e.message);
-        process.exit(1);
-    }
-    ` : `
-    console.log('ℹ️ No models found in schema to test.');
-    `}
+    await prisma.$queryRaw\`SELECT 1\`;
+    ${testModel ? `await prisma.${testModel.toLowerCase()}.count();` : ''}
 }
 
 main()
-    .catch((e) => {
-        console.error('❌ Integration Test Failed:', e);
-        process.exit(1);
-    })
-    .finally(async () => {
-        await prisma.$disconnect();
-    });
+    .catch((e) => { console.error(JSON.stringify({ error: e.message })); process.exit(1); })
+    .finally(() => prisma.$disconnect());
 `;
                     await fs.writeFile(testScriptPath, testCode);
 
-                    // Run test script using tsx (assuming it's available or npx tsx)
-                    const { stdout } = await execAsync('npx tsx verify-db-temp.ts', {
-                        cwd: projectPath,
-                        shell,
-                        timeout: 30000
+                    const { stdout, stderr } = await execAsync('npx tsx verify-db-temp.ts', {
+                        cwd: projectPath, shell, timeout: 30000
                     });
 
-                    log.push('✅ Prisma Integration Test Passed');
-                    log.push(stdout.trim());
-
-                    // Cleanup
                     await fs.unlink(testScriptPath).catch(() => { });
 
+                    addCheck({
+                        name: 'prisma_integration',
+                        status: 'pass',
+                        message: 'Database connection and query successful',
+                        details: stdout.trim()
+                    });
+
                 } catch (error: any) {
-                    log.push('❌ Prisma Integration Test Failed');
-                    log.push(error.stdout || error.message);
-                    fixes.push('Recommended: Check database connection string in .env and run `npx prisma migrate dev`');
+                    const errorMsg = error.stderr || error.stdout || error.message;
+
+                    addCheck({
+                        name: 'prisma_integration',
+                        status: 'fail',
+                        message: 'Database connection or query failed',
+                        details: errorMsg,
+                        fixCommand: 'npx prisma migrate dev --name init'
+                    });
+
+                    result.suggestedFixes.push({
+                        issue: 'Database connection failed',
+                        command: 'npx prisma migrate dev --name init',
+                        description: 'Ensure DATABASE_URL in .env is correct, then run migrations'
+                    });
+
+                    // Cleanup temp file
+                    await fs.unlink(path.join(projectPath, 'verify-db-temp.ts')).catch(() => { });
                 }
             }
 
-            // 5. Build Verification
-            if (input.skipBuild !== 'true') {
-                log.push('🔄 Verifying Build (running pnpm build)...');
-                try {
-                    // Fix potentially missing types before build if autoFix is on
-                    if (autoFix) {
-                        await checkTypescriptTool.execute({ projectPath });
-                    }
+            // 5. TypeScript Check
+            try {
+                const { stdout, stderr } = await execAsync('npx tsc --noEmit 2>&1', {
+                    cwd: projectPath, shell, timeout: 60000
+                });
 
-                    await execAsync('pnpm build', {
-                        cwd: projectPath,
-                        shell,
-                        timeout: 300000 // 5 minutes 
+                const output = (stdout + stderr).trim();
+                if (output === '' || output.includes('0 errors')) {
+                    addCheck({
+                        name: 'typescript',
+                        status: 'pass',
+                        message: 'No TypeScript errors'
                     });
-                    log.push('✅ Project Build Successful');
+                } else {
+                    // Parse errors for structured output
+                    const errorLines = output.split('\n').filter(l => l.includes('error TS'));
+                    const errorCount = errorLines.length;
+
+                    addCheck({
+                        name: 'typescript',
+                        status: 'fail',
+                        message: `${errorCount} TypeScript error(s) found`,
+                        details: errorLines.slice(0, 10).join('\n') + (errorCount > 10 ? `\n... and ${errorCount - 10} more` : ''),
+                        fixCommand: 'npx tsc --noEmit'
+                    });
+
+                    result.suggestedFixes.push({
+                        issue: `${errorCount} TypeScript errors`,
+                        command: 'npx tsc --noEmit',
+                        description: 'Review and fix type errors in the listed files'
+                    });
+                }
+            } catch (error: any) {
+                const output = (error.stdout || '') + (error.stderr || '');
+                const errorLines = output.split('\n').filter((l: string) => l.includes('error TS'));
+
+                addCheck({
+                    name: 'typescript',
+                    status: 'fail',
+                    message: `TypeScript check failed with ${errorLines.length} error(s)`,
+                    details: errorLines.slice(0, 10).join('\n'),
+                    fixCommand: 'npx tsc --noEmit'
+                });
+
+                result.suggestedFixes.push({
+                    issue: 'TypeScript errors',
+                    command: 'npx tsc --noEmit',
+                    description: 'Fix the type errors shown in details'
+                });
+            }
+
+            // 6. Build Verification
+            if (input.skipBuild === 'true') {
+                addCheck({
+                    name: 'build',
+                    status: 'skip',
+                    message: 'Build verification skipped by user'
+                });
+            } else {
+                try {
+                    await execAsync('pnpm build', {
+                        cwd: projectPath, shell, timeout: 300000
+                    });
+
+                    addCheck({
+                        name: 'build',
+                        status: 'pass',
+                        message: 'Project builds successfully'
+                    });
                 } catch (error: any) {
-                    log.push('❌ Project Build Failed');
-                    // Capture last few lines of error
-                    const stderr = error.stderr || '';
-                    const errorDetails = stderr.split('\n').slice(-10).join('\n');
-                    log.push(errorDetails);
+                    const stderr = error.stderr || error.stdout || error.message;
+                    // Extract meaningful error lines
+                    const lines = stderr.split('\n');
+                    const errorLines = lines.filter((l: string) =>
+                        l.includes('Error') || l.includes('error') ||
+                        l.includes('failed') || l.includes('TypeError') ||
+                        l.includes('Cannot find') || l.includes('Module not found')
+                    ).slice(0, 15);
+
+                    addCheck({
+                        name: 'build',
+                        status: 'fail',
+                        message: 'Build failed',
+                        details: errorLines.join('\n') || lines.slice(-10).join('\n'),
+                        fixCommand: 'pnpm build'
+                    });
+
+                    result.suggestedFixes.push({
+                        issue: 'Build failure',
+                        command: 'pnpm build',
+                        description: 'Review build errors in details and fix the underlying issues'
+                    });
+                }
+            }
+
+            // 7. ESLint Check (Production-ready)
+            try {
+                const { stdout, stderr } = await execAsync('pnpm lint 2>&1 || true', {
+                    cwd: projectPath, shell, timeout: 60000
+                });
+                const output = (stdout + stderr).trim();
+
+                if (output === '' || output.includes('No ESLint') || !output.includes('error')) {
+                    addCheck({
+                        name: 'eslint',
+                        status: 'pass',
+                        message: 'No ESLint errors found'
+                    });
+                } else {
+                    const errorCount = (output.match(/error/gi) || []).length;
+                    const warningCount = (output.match(/warning/gi) || []).length;
+
+                    addCheck({
+                        name: 'eslint',
+                        status: errorCount > 0 ? 'fail' : 'warn',
+                        message: `ESLint: ${errorCount} error(s), ${warningCount} warning(s)`,
+                        details: output.split('\n').slice(0, 10).join('\n'),
+                        fixCommand: 'pnpm lint --fix'
+                    });
+
+                    if (errorCount > 0) {
+                        result.suggestedFixes.push({
+                            issue: 'ESLint errors',
+                            command: 'pnpm lint --fix',
+                            description: 'Auto-fix ESLint issues where possible'
+                        });
+                    }
+                }
+            } catch (error: any) {
+                addCheck({
+                    name: 'eslint',
+                    status: 'warn',
+                    message: 'ESLint check skipped (lint script may not exist)',
+                    details: error.message
+                });
+            }
+
+            // 8. Security Audit (Production-ready)
+            try {
+                const { stdout, stderr } = await execAsync('pnpm audit --audit-level=high 2>&1 || true', {
+                    cwd: projectPath, shell, timeout: 60000
+                });
+                const output = (stdout + stderr).trim();
+
+                if (output.includes('found 0 vulnerabilities') || output.includes('No known vulnerabilities')) {
+                    addCheck({
+                        name: 'security_audit',
+                        status: 'pass',
+                        message: 'No high/critical security vulnerabilities found'
+                    });
+                } else if (output.includes('high') || output.includes('critical')) {
+                    const highCount = (output.match(/high/gi) || []).length;
+                    const criticalCount = (output.match(/critical/gi) || []).length;
+
+                    addCheck({
+                        name: 'security_audit',
+                        status: 'warn',
+                        message: `Security: ${criticalCount} critical, ${highCount} high vulnerabilities`,
+                        details: output.split('\n').slice(0, 10).join('\n'),
+                        fixCommand: 'pnpm audit --fix'
+                    });
+
+                    result.suggestedFixes.push({
+                        issue: 'Security vulnerabilities detected',
+                        command: 'pnpm audit --fix',
+                        description: 'Attempt to auto-fix security issues'
+                    });
+                } else {
+                    addCheck({
+                        name: 'security_audit',
+                        status: 'pass',
+                        message: 'No high/critical security vulnerabilities'
+                    });
+                }
+            } catch (error: any) {
+                addCheck({
+                    name: 'security_audit',
+                    status: 'warn',
+                    message: 'Security audit skipped',
+                    details: error.message
+                });
+            }
+
+            // 9. Environment Variables Check (Production-ready)
+            const hasEnvLocal = await checkFile('.env.local');
+            const hasEnv = await checkFile('.env');
+            const hasEnvExample = await checkFile('.env.example');
+
+            if (hasEnvLocal || hasEnv) {
+                // Check if DATABASE_URL is set when Prisma is present
+                if (prismaReady) {
+                    try {
+                        const envContent = await fs.readFile(
+                            path.join(projectPath, hasEnvLocal ? '.env.local' : '.env'),
+                            'utf-8'
+                        );
+
+                        if (envContent.includes('DATABASE_URL=') && !envContent.includes('DATABASE_URL=\n')) {
+                            addCheck({
+                                name: 'env_config',
+                                status: 'pass',
+                                message: 'Environment variables configured with DATABASE_URL'
+                            });
+                        } else {
+                            addCheck({
+                                name: 'env_config',
+                                status: 'warn',
+                                message: 'DATABASE_URL may not be set properly in .env',
+                                fixCommand: 'Add DATABASE_URL=postgresql://... to .env'
+                            });
+                        }
+                    } catch {
+                        addCheck({
+                            name: 'env_config',
+                            status: 'warn',
+                            message: 'Could not read .env file'
+                        });
+                    }
+                } else {
+                    addCheck({
+                        name: 'env_config',
+                        status: 'pass',
+                        message: 'Environment file exists'
+                    });
+                }
+
+                // Check for .env.example (production best practice)
+                if (!hasEnvExample) {
+                    addCheck({
+                        name: 'env_example',
+                        status: 'warn',
+                        message: 'Missing .env.example - recommended for production deployments',
+                        details: 'Create .env.example with placeholder values for documentation'
+                    });
                 }
             } else {
-                log.push('ℹ️ Build verification skipped');
+                addCheck({
+                    name: 'env_config',
+                    status: 'warn',
+                    message: 'No .env or .env.local file found',
+                    details: 'Create .env.local for local development'
+                });
             }
 
-            return `Verification Results:\n${log.join('\n')}\n\n${fixes.length > 0 ? 'Auto-Fix Output:\n' + fixes.join('\n\n') : ''}`;
+            // 10. Next.js Config Check (Production-ready)
+            const hasNextConfig = await checkFile('next.config.js') || await checkFile('next.config.mjs') || await checkFile('next.config.ts');
+            if (hasNextConfig) {
+                addCheck({
+                    name: 'nextjs_config',
+                    status: 'pass',
+                    message: 'Next.js configuration file present'
+                });
+            } else {
+                addCheck({
+                    name: 'nextjs_config',
+                    status: 'warn',
+                    message: 'No next.config found - using default settings',
+                    details: 'Consider adding next.config.mjs for production optimizations'
+                });
+            }
+
+            // 11. Package.json Scripts Check (Production-ready)
+            try {
+                const pkgContent = await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8');
+                const pkg = JSON.parse(pkgContent);
+                const scripts = pkg.scripts || {};
+
+                const requiredScripts = ['dev', 'build', 'start'];
+                const recommendedScripts = ['lint', 'test'];
+
+                const missingRequired = requiredScripts.filter(s => !scripts[s]);
+                const missingRecommended = recommendedScripts.filter(s => !scripts[s]);
+
+                if (missingRequired.length === 0) {
+                    addCheck({
+                        name: 'npm_scripts',
+                        status: missingRecommended.length > 0 ? 'warn' : 'pass',
+                        message: missingRecommended.length > 0
+                            ? `Scripts OK, but missing recommended: ${missingRecommended.join(', ')}`
+                            : 'All required and recommended npm scripts present',
+                        details: missingRecommended.length > 0
+                            ? 'Consider adding: lint, test scripts for production readiness'
+                            : undefined
+                    });
+                } else {
+                    addCheck({
+                        name: 'npm_scripts',
+                        status: 'fail',
+                        message: `Missing required scripts: ${missingRequired.join(', ')}`,
+                        fixCommand: 'Check package.json scripts section'
+                    });
+                }
+            } catch (error: any) {
+                addCheck({
+                    name: 'npm_scripts',
+                    status: 'fail',
+                    message: 'Could not read package.json',
+                    details: error.message
+                });
+            }
+
+            return JSON.stringify(result, null, 2);
 
         } catch (error: any) {
-            return `Error verifying project: ${error.message}`;
+            result.success = false;
+            result.checks.push({
+                name: 'verification_error',
+                status: 'fail',
+                message: `Verification process error: ${error.message}`,
+                details: error.stack
+            });
+            return JSON.stringify(result, null, 2);
         }
     }
 };
@@ -821,10 +1139,8 @@ main()
  */
 export function getCodeTools(): Tool[] {
     return [
-        runCommandTool,
         createProjectTool,
         installPackagesTool,
-        searchCodeTool,
         checkTypescriptTool,
         checkBuildErrorTool,
         setupShadcnTool,
