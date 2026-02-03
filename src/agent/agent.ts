@@ -9,8 +9,6 @@
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
-import fs from 'fs/promises';
-import path from 'path';
 import { logger } from '../utils/logger.js';
 import { Tool, AgentConfig, AgentTask, ToolCall } from './types.js';
 import { AGENT_SYSTEM_PROMPT, createTaskPrompt } from './prompts/agent-prompt.js';
@@ -52,7 +50,6 @@ export class Agent {
     private config: AgentConfig;
     private tools: Tool[];
     private conversation: ConversationMessage[] = [];
-    private customRules: string = '';
     private activeProjectPath: string | null = null;
     private isInitialized: boolean = false;
 
@@ -73,46 +70,10 @@ export class Agent {
      */
     public async init(): Promise<void> {
         if (this.isInitialized) return;
-
-        // Load custom rules
-        await this.loadCustomRules();
         this.isInitialized = true;
     }
 
-    /**
-     * Load custom coding rules from rules/*.md
-     */
-    private async loadCustomRules(): Promise<void> {
-        try {
-            const rulesDir = path.join(process.cwd(), 'rules');
 
-            // Check if directory exists
-            try {
-                await fs.access(rulesDir);
-            } catch {
-                return; // No rules directory, skip
-            }
-
-            const files = await fs.readdir(rulesDir);
-            const mdFiles = files.filter(f => f.endsWith('.md'));
-
-            if (mdFiles.length > 0) {
-                logger.info(`Found ${mdFiles.length} custom rule file(s)`);
-
-                let rulesContent = '\n\n# User-Defined Coding Rules\n';
-
-                for (const file of mdFiles) {
-                    const content = await fs.readFile(path.join(rulesDir, file), 'utf-8');
-                    rulesContent += `\n## Rule Set: ${file}\n${content}\n`;
-                }
-
-                this.customRules = rulesContent;
-                logger.info('Custom rules loaded successfully');
-            }
-        } catch (error: any) {
-            logger.warn(`Error loading custom rules: ${error.message}`);
-        }
-    }
 
     /**
      * Start a new agent session
@@ -315,13 +276,11 @@ export class Agent {
             }))
         }];
 
-        const systemWithRules = AGENT_SYSTEM_PROMPT + this.customRules;
-
         const response = await this.client.models.generateContent({
             model: this.config.modelName || 'gemini-3-flash-preview',
             contents: this.conversation as any,
             config: {
-                systemInstruction: systemWithRules,
+                systemInstruction: AGENT_SYSTEM_PROMPT,
                 tools: tools as any
             }
         });
@@ -374,21 +333,31 @@ export class Agent {
     }
 
     /**
-     * Execute tool calls and return results
+     * Execute tool calls in parallel and return results
      */
     private async executeTools(toolCalls: ToolCall[]): Promise<{ name: string; result: string }[]> {
-        const results: { name: string; result: string }[] = [];
-
-        for (const call of toolCalls) {
+        // Prepare tool calls with path enforcement
+        const preparedCalls = toolCalls.map(call => {
             const tool = this.tools.find(t => t.name === call.name);
 
+            // Enforce project path
+            if (this.activeProjectPath) {
+                if (call.arguments.cwd !== undefined) {
+                    call.arguments.cwd = this.activeProjectPath;
+                }
+                if (call.arguments.projectPath !== undefined) {
+                    call.arguments.projectPath = this.activeProjectPath;
+                }
+            }
+
+            return { call, tool };
+        });
+
+        // Execute all tools in parallel
+        const promises = preparedCalls.map(async ({ call, tool }) => {
             if (!tool) {
                 logger.warn(`Tool not found: ${call.name}`);
-                results.push({
-                    name: call.name,
-                    result: `Error: Tool "${call.name}" not found`
-                });
-                continue;
+                return { name: call.name, result: `Error: Tool "${call.name}" not found` };
             }
 
             if (this.config.verbose) {
@@ -397,40 +366,23 @@ export class Agent {
                 logger.info(`  → ${call.name}`);
             }
 
-            // CRITICAL CHECK: Enforce strict project path if active
-            if (this.activeProjectPath) {
-                // Force 'cwd' to be the active project path
-                if (call.arguments.cwd !== undefined) {
-                    call.arguments.cwd = this.activeProjectPath;
-                }
-                // Force 'projectPath' to be the active project path
-                if (call.arguments.projectPath !== undefined) {
-                    call.arguments.projectPath = this.activeProjectPath;
-                }
-            }
-
             try {
                 const result = await tool.execute(call.arguments);
-                results.push({
-                    name: call.name,
-                    result: result
-                });
 
                 if (this.config.verbose) {
-                    const preview = result.length > 100
-                        ? result.substring(0, 100) + '...'
-                        : result;
+                    const preview = result.length > 100 ? result.substring(0, 100) + '...' : result;
                     logger.dim(`  Result: ${preview}`);
                 }
+
+                return { name: call.name, result };
             } catch (error: any) {
                 logger.error(`Tool ${call.name} failed: ${error.message}`);
-                results.push({
-                    name: call.name,
-                    result: `Error: ${error.message}`
-                });
+                return { name: call.name, result: `Error: ${error.message}` };
             }
-        }
+        });
 
+        // Wait for all tools to complete
+        const results = await Promise.all(promises);
         return results;
     }
 }

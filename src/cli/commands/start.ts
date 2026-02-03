@@ -1,7 +1,7 @@
 import 'dotenv/config'; // Load env vars
 import { Command } from 'commander';
 import inquirer from 'inquirer';
-import { z } from 'zod';
+import ora from 'ora';
 import { logger } from '../../utils/logger.js';
 import { Agent, AgentConfig, AgentTask } from '../../agent/index.js';
 import fs from 'fs/promises';
@@ -9,29 +9,33 @@ import path from 'path';
 
 export const startCommand = new Command('start')
     .description('Start the AI Agent')
-    .option('-p, --project-path <path>', 'Path to target project (new or existing)')
+    .option('-n, --project-name <name>', 'Project name (will be created in current directory)')
     .option('-m, --max-iterations <number>', 'Maximum agent iterations', '100')
+    .option('--skip-db', 'Skip PostgreSQL configuration (for static sites)')
     .option('--no-verbose', 'Disable verbose logging')
     .action(async (options) => {
         try {
             // 1. Initial Input Resolution
             let currentPrompt: string | undefined;
-            let projectPath = options.projectPath;
+            let projectName = options.projectName;
 
-            if (!projectPath) {
+            if (!projectName) {
                 const answer = await inquirer.prompt([{
                     type: 'input',
-                    name: 'projectPath',
-                    message: 'Where should the project be created?',
-                    default: './my-app'
+                    name: 'projectName',
+                    message: 'What is your project name?',
+                    default: 'my-app',
+                    validate: (input: string) => {
+                        // Validate project name (no spaces, special chars)
+                        if (/^[a-z0-9-]+$/.test(input)) return true;
+                        return 'Project name should only contain lowercase letters, numbers, and hyphens';
+                    }
                 }]);
-                projectPath = answer.projectPath;
+                projectName = answer.projectName;
             }
 
-            // Ensure absolute path usage could be beneficial, but keeping relative as per user input for now.
-            // If prompt is missing from args, ask for it (unless users just want to start the loop empty, but typically they start with something)
-            // Actually, if promptArg is missing, commander might complain because it's an .argument(), but let's handle if it was optional.
-            // Here <prompt> is mandatory in .argument('<prompt>'), so promptArg is guaranteed.
+            // Derive projectPath from projectName (absolute path for consistency)
+            const projectPath = path.resolve(process.cwd(), projectName);
 
             let geminiKey = process.env.GEMINI_API_KEY;
             if (!geminiKey) {
@@ -79,44 +83,50 @@ export const startCommand = new Command('start')
                 default: 'gemini-3-flash-preview'
             }]);
 
-            // Database Creds (Step-by-Step)
-            const defaultDbName = path.basename(projectPath || 'my-app');
-            console.log('\n--- PostgreSQL Configuration ---');
+            // Database Creds (Step-by-Step) - Skip if --skip-db is used
+            let databaseUrl: string | undefined;
 
-            const dbCreds = await inquirer.prompt([
-                {
-                    type: 'input',
-                    name: 'host',
-                    message: 'Host:',
-                    default: 'localhost'
-                },
-                {
-                    type: 'input',
-                    name: 'port',
-                    message: 'Port:',
-                    default: '5432'
-                },
-                {
-                    type: 'input',
-                    name: 'username',
-                    message: 'Username:',
-                    default: 'postgres'
-                },
-                {
-                    type: 'input', // Using input so user can see/edit default easily
-                    name: 'password',
-                    message: 'Password:',
-                    default: 'postgres'
-                },
-                {
-                    type: 'input',
-                    name: 'dbName',
-                    message: 'Database Name:',
-                    default: defaultDbName
-                }
-            ]);
+            if (!options.skipDb) {
+                const defaultDbName = projectName;
+                console.log('\n--- PostgreSQL Configuration ---');
 
-            const databaseUrl = `postgresql://${dbCreds.username}:${dbCreds.password}@${dbCreds.host}:${dbCreds.port}/${dbCreds.dbName}`;
+                const dbCreds = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'host',
+                        message: 'Host:',
+                        default: 'localhost'
+                    },
+                    {
+                        type: 'input',
+                        name: 'port',
+                        message: 'Port:',
+                        default: '5432'
+                    },
+                    {
+                        type: 'input',
+                        name: 'username',
+                        message: 'Username:',
+                        default: 'postgres'
+                    },
+                    {
+                        type: 'input',
+                        name: 'password',
+                        message: 'Password:',
+                        default: 'postgres'
+                    },
+                    {
+                        type: 'input',
+                        name: 'dbName',
+                        message: 'Database Name:',
+                        default: defaultDbName
+                    }
+                ]);
+
+                databaseUrl = `postgresql://${dbCreds.username}:${dbCreds.password}@${dbCreds.host}:${dbCreds.port}/${dbCreds.dbName}`;
+            } else {
+                logger.info('Skipping PostgreSQL configuration (--skip-db)');
+            }
 
             const config: AgentConfig = {
                 geminiApiKey: geminiKey,
@@ -209,13 +219,7 @@ export const startCommand = new Command('start')
             logger.success('Session ended. Happy coding!');
 
         } catch (error: any) {
-            if (error instanceof z.ZodError) {
-                (error as any).errors.forEach((err: any) => {
-                    logger.error(`Validation Error: ${err.message}`);
-                });
-            } else {
-                logger.error(`Error: ${error.message || 'Unknown error'}`);
-            }
+            logger.error(`Error: ${error.message || 'Unknown error'}`);
             process.exit(1);
         }
     });
