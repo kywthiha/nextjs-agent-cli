@@ -2,19 +2,46 @@ import 'dotenv/config'; // Load env vars
 import { Command } from 'commander';
 import inquirer from 'inquirer';
 import ora from 'ora';
+import chalk from 'chalk';
 import { logger } from '../../utils/logger.js';
 import { Agent, AgentConfig, AgentTask } from '../../agent/index.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { getGeminiApiKey, setGeminiApiKey, getCredPath } from '../../utils/cred-store.js';
+
+/**
+ * Display welcome banner
+ */
+function showWelcomeBanner(): void {
+    console.log('');
+    console.log(chalk.cyan.bold('╔═══════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan.bold('║') + chalk.white.bold('     🚀 Next.js Fullstack Agent CLI                        ') + chalk.cyan.bold('║'));
+    console.log(chalk.cyan.bold('║') + chalk.gray('     Build full-stack apps with AI assistance              ') + chalk.cyan.bold('║'));
+    console.log(chalk.cyan.bold('╚═══════════════════════════════════════════════════════════╝'));
+    console.log('');
+}
 
 export const startCommand = new Command('start')
     .description('Start the AI Agent')
     .option('-n, --project-name <name>', 'Project name (will be created in current directory)')
-    .option('-m, --max-iterations <number>', 'Maximum agent iterations', '100')
+    .option('-m, --max-iterations <number>', 'Maximum agent iterations', '500')
     .option('--skip-db', 'Skip PostgreSQL configuration (for static sites)')
     .option('--no-verbose', 'Disable verbose logging')
     .action(async (options) => {
         try {
+            // Show welcome banner
+            showWelcomeBanner();
+
+            const spinner = ora({
+                text: chalk.blue('Initializing Next.js Agent...'),
+                spinner: 'dots'
+            }).start();
+
+            // Small delay for visual effect
+            await new Promise(resolve => setTimeout(resolve, 500));
+            spinner.succeed(chalk.green('Ready to build!'));
+            console.log('');
+
             // 1. Initial Input Resolution
             let currentPrompt: string | undefined;
             let projectName = options.projectName;
@@ -37,7 +64,17 @@ export const startCommand = new Command('start')
             // Derive projectPath from projectName (absolute path for consistency)
             const projectPath = path.resolve(process.cwd(), projectName);
 
+            // API Key resolution: env -> credential store -> prompt
             let geminiKey = process.env.GEMINI_API_KEY;
+
+            if (!geminiKey) {
+                // Try credential store
+                geminiKey = await getGeminiApiKey();
+                if (geminiKey) {
+                    logger.info(`Using API key from ${getCredPath()}`);
+                }
+            }
+
             if (!geminiKey) {
                 // Prompt for key
                 const answers = await inquirer.prompt([{
@@ -49,14 +86,20 @@ export const startCommand = new Command('start')
 
                 const key = answers.apiKey;
 
-                // Save to .env
-                const envContent = `GEMINI_API_KEY=${key}\n`;
-                await fs.writeFile('.env', envContent, { flag: 'a' }); // Append or create
+                // Ask if user wants to save to credential store
+                const saveAnswer = await inquirer.prompt([{
+                    type: 'confirm',
+                    name: 'save',
+                    message: 'Save API key for future sessions?',
+                    default: true
+                }]);
 
-                // Set in current process
-                process.env.GEMINI_API_KEY = key;
+                if (saveAnswer.save) {
+                    await setGeminiApiKey(key);
+                    logger.success(`API key saved to ${getCredPath()}`);
+                }
+
                 geminiKey = key;
-                logger.success('API Key saved to .env file');
             }
 
             if (!geminiKey) {
@@ -132,7 +175,7 @@ export const startCommand = new Command('start')
                 geminiApiKey: geminiKey,
                 maxIterations: maxIterations,
                 verbose: verbose,
-                modelName: modelAnswer.model
+                modelName: modelAnswer.model,
             };
 
             // Initialize agent once

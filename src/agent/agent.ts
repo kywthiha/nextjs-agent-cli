@@ -1,46 +1,24 @@
 /**
- * Core AI Agent
- * 
- * This agent uses an agentic loop pattern:
- * 1. Send task + tools to AI
- * 2. AI responds with tool calls or text
- * 3. Execute tools, return results
- * 4. Repeat until AI indicates completion
+ * Core AI Agent - Agentic loop pattern with Gemini 3 SDK
  */
 
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Part, Content, GenerateContentResponse, Tool as SDKTool, FunctionDeclaration } from '@google/genai';
 import { logger } from '../utils/logger.js';
 import { Tool, AgentConfig, AgentTask, ToolCall } from './types.js';
 import { AGENT_SYSTEM_PROMPT, createTaskPrompt } from './prompts/agent-prompt.js';
 import { getAllTools } from './tools/index.js';
+import { ConversationSummarizer } from './summarizer.js';
 
-interface ConversationMessage {
-    role: 'user' | 'model';
-    parts: Part[];
-}
+type ConversationMessage = Content;
 
-interface Part {
-    text?: string;
-    functionCall?: {
-        name: string;
-        args: Record<string, any>;
-    };
-    thoughtSignature?: string;
-    functionResponse?: {
-        name: string;
-        response: {
-            result: string;
-        };
-    };
-}
-
-// Retry configuration
 const MAX_API_RETRIES = 5;
 const INITIAL_RETRY_DELAY_MS = 2000;
 
-/**
- * Sleep helper
- */
+// Token management constants
+const MAX_CONTEXT_TOKENS = 1000000;      // 1M input context (Gemini 3 Pro/Flash), 64k output
+const COMPRESSION_THRESHOLD = 0.7;       // Compress at 70% capacity
+const KEEP_RECENT_MESSAGES = 10;         // Always keep last N messages
+
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -52,32 +30,26 @@ export class Agent {
     private conversation: ConversationMessage[] = [];
     private activeProjectPath: string | null = null;
     private isInitialized: boolean = false;
+    private originalTaskPrompt: string = '';
+    private summarizer: ConversationSummarizer;
+    private lastTokenCount: number = 0;  // Actual token count from last API response
 
     constructor(config: AgentConfig) {
         this.config = config;
         this.client = new GoogleGenAI({ apiKey: config.geminiApiKey });
-
-        // Get all available tools
         this.tools = getAllTools();
-
-        if (config.verbose) {
-            logger.info(`Agent initialized with ${this.tools.length} tools`);
-        }
+        this.summarizer = new ConversationSummarizer(config.geminiApiKey, config.modelName);
     }
 
-    /**
-     * Initialize the agent (async setup)
-     */
+    private getThinkingLevel(modelName: string): ThinkingLevel {
+        return modelName.includes('pro') ? ThinkingLevel.HIGH : ThinkingLevel.MEDIUM;
+    }
+
     public async init(): Promise<void> {
         if (this.isInitialized) return;
         this.isInitialized = true;
     }
 
-
-
-    /**
-     * Start a new agent session
-     */
     async start(task: AgentTask): Promise<void> {
         if (!this.isInitialized) await this.init();
 
@@ -87,27 +59,31 @@ export class Agent {
         logger.step('Starting Full Stack Agent');
         logger.info(`Goal: ${prompt}`);
         logger.info(`Output: ${projectPath}`);
-        if (databaseUrl) logger.info(`Context: DB URL provided`);
+        if (databaseUrl) logger.info(`DB URL provided`);
 
-        // Phase 1: Planning
-        logger.step('Phase 1: Planning & Setup');
-
-        // Initial setup prompt
         const setupPrompt = createTaskPrompt(prompt, projectPath, databaseUrl);
+        this.originalTaskPrompt = setupPrompt;
 
-        this.conversation = [{
-            role: 'user',
-            parts: [{ text: setupPrompt }]
-        }];
+        // Check for previous summary to continue from
+        const previousSummary = await this.summarizer.loadSummary(projectPath);
+        if (previousSummary) {
+            logger.info('Found previous progress summary, continuing...');
+            this.conversation = [{
+                role: 'user',
+                parts: [{ text: `${setupPrompt}\n\n## Previous Progress:\n${previousSummary}\n\nContinue from where you left off.` }]
+            }];
+        } else {
+            this.conversation = [{
+                role: 'user',
+                parts: [{ text: setupPrompt }]
+            }];
+        }
 
         await this.executeTaskLoop('Planning-Phase');
 
         logger.step('Agent session ended - Implementation Complete');
     }
 
-    /**
-     * Continue the conversation with a new user message
-     */
     async chat(message: string): Promise<void> {
         if (!this.isInitialized) await this.init();
         if (!this.activeProjectPath) {
@@ -127,28 +103,25 @@ export class Agent {
         logger.step('Request Completed');
     }
 
-    /**
-     * Execute the agent loop for a single task/node
-     */
     private async executeTaskLoop(contextId: string): Promise<void> {
         let iteration = 0;
         let isComplete = false;
-
-        // Reset iteration count for each node to ensure full effort
         const maxIterations = this.config.maxIterations;
 
         while (!isComplete && iteration < maxIterations) {
             iteration++;
             logger.step(`[${contextId}] Iteration ${iteration}/${maxIterations}`);
 
+            // Check and compress conversation if needed
+            await this.checkAndCompressConversation();
+
             try {
-                // Call AI with tools (with retry logic)
                 const response = await this.callAIWithRetry();
 
-                // Process response
-                const { text, toolCalls, functionResponseParts } = this.parseResponse(response);
+                // Track actual token usage from SDK response
+                this.updateTokenCount(response);
 
-                // Log AI text response
+                const { text, toolCalls, functionResponseParts } = this.parseResponse(response);
                 if (text) {
                     logger.dim('AI: ' + text.substring(0, 200) + (text.length > 200 ? '...' : ''));
 
@@ -160,7 +133,6 @@ export class Agent {
                     }
                 }
 
-                // If no tool calls, we might be done or stuck
                 if (toolCalls.length === 0) {
                     if (!text) {
                         logger.warn('No response from AI, retrying...');
@@ -174,11 +146,7 @@ export class Agent {
                     continue;
                 }
 
-                // Execute tool calls
-                logger.info(`Executing ${toolCalls.length} tool(s)...`);
                 const toolResults = await this.executeTools(toolCalls);
-
-                // Add tool results to conversation
                 this.conversation.push({
                     role: 'model',
                     parts: functionResponseParts.length > 0 ? functionResponseParts : [{ text: text || '' }]
@@ -197,10 +165,16 @@ export class Agent {
             } catch (error: any) {
                 logger.error(`[${contextId}] Iteration ${iteration} error: ${error.message}`);
 
-                // Add error to conversation so AI can recover
+                // Check if token limit exceeded
+                if (this.isTokenLimitError(error)) {
+                    logger.warn('Token limit exceeded, generating summary and restarting...');
+                    await this.handleTokenLimitExceeded();
+                    continue;
+                }
+
                 this.conversation.push({
                     role: 'user',
-                    parts: [{ text: `Error occurred: ${error.message}. Please try a different approach.` }]
+                    parts: [{ text: `Error: ${error.message}. Try a different approach.` }]
                 });
             }
         }
@@ -210,10 +184,7 @@ export class Agent {
         }
     }
 
-    /**
-     * Call the AI with retry logic for transient errors (503, rate limits, etc.)
-     */
-    private async callAIWithRetry(): Promise<any> {
+    private async callAIWithRetry(): Promise<GenerateContentResponse> {
         let lastError: Error | null = null;
 
         for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
@@ -238,7 +209,7 @@ export class Agent {
                 if (isRetryable && attempt < MAX_API_RETRIES) {
                     // Exponential backoff: 2s, 4s, 8s, 16s, 32s
                     const delayMs = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-                    logger.warn(`API error (attempt ${attempt}/${MAX_API_RETRIES}), retrying in ${delayMs / 1000}s...`);
+                    logger.warn(`API error (${attempt}/${MAX_API_RETRIES}), retrying in ${delayMs / 1000}s...`);
                     await sleep(delayMs);
                 } else if (!isRetryable) {
                     // Non-retryable error, throw immediately
@@ -251,52 +222,52 @@ export class Agent {
         throw lastError || new Error('API call failed after max retries');
     }
 
-    /**
-     * Call the AI with current conversation and tools
-     */
-    private async callAI(): Promise<any> {
-        // Convert tools to Gemini function declarations
-        const tools = [{
-            functionDeclarations: this.tools.map(t => ({
-                name: t.name,
-                description: t.description,
-                parameters: {
-                    type: Type.OBJECT,
-                    properties: Object.fromEntries(
-                        Object.entries(t.parameters.properties || {}).map(([key, value]: [string, any]) => [
-                            key,
-                            {
-                                type: value.type.toUpperCase(),
-                                description: value.description
-                            }
-                        ])
-                    ),
-                    required: t.parameters.required || []
-                }
-            }))
-        }];
+    private async callAI(): Promise<GenerateContentResponse> {
+        const functionDeclarations: FunctionDeclaration[] = this.tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            parametersJsonSchema: {
+                type: 'object',
+                properties: Object.fromEntries(
+                    Object.entries(t.parameters.properties || {}).map(([key, value]: [string, any]) => [
+                        key,
+                        {
+                            type: value.type,
+                            description: value.description,
+                            ...(value.enum && { enum: value.enum })
+                        }
+                    ])
+                ),
+                required: t.parameters.required || []
+            }
+        }));
+
+        const tools: SDKTool[] = [{ functionDeclarations }];
+
+        const modelName = this.config.modelName || 'gemini-3-flash-preview';
+        const thinkingLevel = this.getThinkingLevel(modelName);
 
         const response = await this.client.models.generateContent({
-            model: this.config.modelName || 'gemini-3-flash-preview',
-            contents: this.conversation as any,
+            model: modelName,
+            contents: this.conversation,
             config: {
                 systemInstruction: AGENT_SYSTEM_PROMPT,
-                tools: tools as any
+                tools,
+                thinkingConfig: {
+                    thinkingLevel,
+                },
             }
         });
 
         return response;
     }
 
-    /**
-     * Parse AI response for text and tool calls
-     */
-    private parseResponse(response: any): {
+    private parseResponse(response: GenerateContentResponse): {
         text: string;
         toolCalls: ToolCall[];
         functionResponseParts: Part[];
     } {
-        const parts = response.candidates?.[0]?.content?.parts || [];
+        const parts: Part[] = response.candidates?.[0]?.content?.parts || [];
         let text = '';
         const toolCalls: ToolCall[] = [];
         const functionResponseParts: Part[] = [];
@@ -307,36 +278,20 @@ export class Agent {
             }
 
             if (part.functionCall) {
-                const fcPart: Part = {
-                    functionCall: {
-                        name: part.functionCall.name,
-                        args: part.functionCall.args || {}
-                    }
-                };
-
-                const signature = (part as any).thoughtSignature || (part as any).thought_signature;
-                if (signature) {
-                    fcPart.thoughtSignature = signature;
-                }
-
                 toolCalls.push({
                     id: `call_${Date.now()}_${toolCalls.length}`,
-                    name: part.functionCall.name,
+                    name: part.functionCall.name || '',
                     arguments: part.functionCall.args || {}
                 });
 
-                functionResponseParts.push(fcPart);
+                functionResponseParts.push(part);
             }
         }
 
         return { text, toolCalls, functionResponseParts };
     }
 
-    /**
-     * Execute tool calls in parallel and return results
-     */
     private async executeTools(toolCalls: ToolCall[]): Promise<{ name: string; result: string }[]> {
-        // Prepare tool calls with path enforcement
         const preparedCalls = toolCalls.map(call => {
             const tool = this.tools.find(t => t.name === call.name);
 
@@ -353,7 +308,6 @@ export class Agent {
             return { call, tool };
         });
 
-        // Execute all tools in parallel
         const promises = preparedCalls.map(async ({ call, tool }) => {
             if (!tool) {
                 logger.warn(`Tool not found: ${call.name}`);
@@ -381,8 +335,76 @@ export class Agent {
             }
         });
 
-        // Wait for all tools to complete
-        const results = await Promise.all(promises);
-        return results;
+        return await Promise.all(promises);
+    }
+
+    // ==================== Token Management ====================
+
+    private isTokenLimitError(error: any): boolean {
+        const msg = error.message?.toLowerCase() || '';
+        return msg.includes('token') ||
+            msg.includes('context length') ||
+            msg.includes('too long') ||
+            msg.includes('maximum context');
+    }
+
+    private updateTokenCount(response: GenerateContentResponse): void {
+        const usage = response.usageMetadata;
+        if (usage?.promptTokenCount) {
+            this.lastTokenCount = usage.promptTokenCount;
+            if (this.config.verbose) {
+                logger.dim(`Input tokens: ${this.lastTokenCount.toLocaleString()} / ${MAX_CONTEXT_TOKENS.toLocaleString()}`);
+            }
+        }
+    }
+
+    private async checkAndCompressConversation(): Promise<void> {
+        const threshold = MAX_CONTEXT_TOKENS * COMPRESSION_THRESHOLD;
+
+        if (this.lastTokenCount > threshold) {
+            logger.info(`Token usage ${this.lastTokenCount.toLocaleString()}/${MAX_CONTEXT_TOKENS.toLocaleString()} (${Math.round(this.lastTokenCount / MAX_CONTEXT_TOKENS * 100)}%), compressing...`);
+            this.compressConversation();
+        }
+    }
+
+    private compressConversation(): void {
+        if (this.conversation.length <= KEEP_RECENT_MESSAGES + 1) {
+            return; // Nothing to compress
+        }
+
+        // Keep first message (original task) and last N messages
+        const firstMessage = this.conversation[0];
+        const recentMessages = this.conversation.slice(-KEEP_RECENT_MESSAGES);
+
+        this.conversation = [firstMessage, ...recentMessages];
+        logger.dim(`Compressed conversation to ${this.conversation.length} messages`);
+    }
+
+    private async handleTokenLimitExceeded(): Promise<void> {
+        if (!this.activeProjectPath) {
+            this.compressConversation();
+            return;
+        }
+
+        try {
+            // Generate summary using Gemini
+            logger.dim('Generating progress summary with Gemini...');
+            const summary = await this.summarizer.generateSummary(this.conversation);
+
+            // Save to file
+            await this.summarizer.saveSummary(this.activeProjectPath, summary);
+
+            // Restart with fresh conversation including summary
+            this.conversation = [{
+                role: 'user',
+                parts: [{ text: `${this.originalTaskPrompt}\n\n## Previous Progress:\n${summary}\n\nContinue from where you left off.` }]
+            }];
+
+            logger.success('Conversation reset with AI-generated progress summary');
+        } catch (error: any) {
+            logger.error(`Failed to handle token limit: ${error.message}`);
+            // Fallback: just compress aggressively
+            this.compressConversation();
+        }
     }
 }

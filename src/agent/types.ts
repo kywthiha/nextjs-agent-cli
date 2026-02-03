@@ -55,6 +55,15 @@ export interface ToolResult {
 }
 
 /**
+ * Thinking level for Gemini 3 models
+ * - 'minimal': Minimal thinking (Flash only) - fastest, for simple tasks
+ * - 'low': Light reasoning - fast responses
+ * - 'medium': Balanced reasoning (Flash only) - good for most coding tasks
+ * - 'high': Deep reasoning - best for complex coding/debugging
+ */
+export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+
+/**
  * Agent configuration
  */
 export interface AgentConfig {
@@ -62,6 +71,12 @@ export interface AgentConfig {
     maxIterations: number;
     verbose?: boolean;
     modelName?: string;
+    /**
+     * Thinking level for Gemini 3 models
+     * - Pro: supports 'low', 'high' (default: 'high')
+     * - Flash: supports 'minimal', 'low', 'medium', 'high' (default: 'high')
+     */
+    thinkingLevel?: ThinkingLevel;
 }
 
 /**
