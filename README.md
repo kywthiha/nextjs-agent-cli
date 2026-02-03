@@ -1,188 +1,252 @@
 # Next.js Fullstack Agent CLI
 
-Gemini 3 Hackathon Entry 2026
+🚀 **AI-powered CLI to build production-ready Next.js fullstack applications using natural language**
 
-**Gemini Next.js Agent CLI** is an autonomous, tool-driven developer agent that transforms natural language into verified, production-ready Next.js fullstack applications.
-
-The agent plans tasks, executes real commands, verifies results, attempts repairs, and asks for manual input only when automation is unsafe.
-
----
-
-## Overview
-
-This CLI is designed to behave like a real developer inside a real project environment.
-
-Instead of only generating code, the agent:
-- Creates and modifies files directly
-- Runs installs and builds
-- Verifies results through execution
-- Attempts automated fixes when failures occur
-- Pauses for human input when decisions require clarity
-
-The focus is reliability, correctness, and real execution.
+[![npm version](https://img.shields.io/npm/v/kyawthiha-nextjs-agent-cli.svg)](https://www.npmjs.com/package/kyawthiha-nextjs-agent-cli)
+[![GitHub](https://img.shields.io/github/stars/kywthiha/nextjs-agent-cli?style=social)](https://github.com/kywthiha/nextjs-agent-cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## Features
+## ✨ Features
 
-- Runtime: Node.js
-- Language: TypeScript
-- CLI Framework: Commander, Inquirer
-- Agent: Gemini-powered agentic workflow
-- Planning before execution
-- Real filesystem operations
-- Build and runtime verification
-- Targeted self-repair for failures
+- 🤖 **AI-Powered Development** - Describe what you want, the agent builds it
+- 📁 **Real File Operations** - Creates and modifies files directly in your project
+- 🔧 **Automated Setup** - Installs dependencies, runs builds, handles database setup
+- ✅ **Self-Verification** - Detects errors and attempts automatic fixes
+- 🔐 **Secure API Key Storage** - Credentials stored locally at `~/.nextjs-agent-cli/cred.json`
+- 🎨 **Beautiful CLI** - Interactive prompts with colorful output
 
 ---
 
-## Requirements
+## 📋 Requirements
 
-Before installing, ensure you have:
-
-- Node.js 18 or later
-- npm or pnpm
-- PostgreSQL (optional, only required if your project uses a database)
-- A Gemini API key
+- **Node.js** 18 or later
+- **npm** or **pnpm**
+- **Gemini API Key** - Get one from [Google AI Studio](https://aistudio.google.com/)
+- **PostgreSQL** (optional) - Only if your project uses a database
 
 ---
 
-## Installation (Step by Step)
+## 🚀 Quick Start
 
-1. Clone the repository
-```bash
-git clone https://github.com/kywthiha/nextjs-agent-cli.git
-```
-
-2. Move into the project directory
-```bash
-cd nextjs-agent-cli
-```
-
-3. Install dependencies
-```bash
-npm install
-```
-
-4. Configure environment variables
-```bash
-cp .env.example .env
-```
-
-Add your Gemini API key to the `.env` file:
-```
-GEMINI_API_KEY=your_api_key_here
-```
-
----
-
-## Running the CLI
-
-Start the CLI in development mode:
+### Install Globally
 
 ```bash
-npm run dev
+npm install -g kyawthiha-nextjs-agent-cli
 ```
 
-The agent will launch an interactive session in your terminal.
+### Set Your API Key (One Time)
+
+```bash
+next-agent config set-api-key
+```
+
+### Start Building
+
+```bash
+next-agent start
+```
 
 ---
 
-## Interactive Workflow
+## 📖 Commands
 
-### 1. Project Creation
+| Command | Description |
+|---------|-------------|
+| `next-agent start` | Start the AI agent to build a new project |
+| `next-agent config set-api-key` | Set or update your Gemini API key |
+| `next-agent config show` | Show current configuration |
+| `next-agent --help` | Display all available commands |
 
-Choose where the Next.js project should be created.
-```
-? Where should the project be created? (./my-app)
+### Start Command Options
+
+```bash
+next-agent start [options]
+
+Options:
+  -n, --project-name <name>    Project name (created in current directory)
+  -m, --max-iterations <num>   Maximum agent iterations (default: 500)
+  --skip-db                    Skip PostgreSQL configuration
+  --no-verbose                 Disable verbose logging
 ```
 
 ---
 
-### 2. Model Selection
+## 🎯 Interactive Workflow
 
-Select the Gemini model for the agent.
-- gemini-3-flash-preview
-- gemini-3-pro-preview
+### 1. Project Setup
 
----
+```
+╔═══════════════════════════════════════════════════════════╗
+║     🚀 Next.js Fullstack Agent CLI                        ║
+║     Build full-stack apps with AI assistance              ║
+╚═══════════════════════════════════════════════════════════╝
 
-### 3. Database Configuration (Optional)
+✔ Ready to build!
 
-If your project requires a database, configure PostgreSQL:
+? What is your project name? my-app
+```
+
+### 2. API Key (First Time Only)
+
+```
+? Please enter your Gemini API Key: ********
+? Save API key for future sessions? Yes
+✔ API key saved to C:\Users\User\.nextjs-agent-cli\cred.json
+```
+
+### 3. Model Selection
+
+```
+? Select Gemini Model:
+  ❯ gemini-3-flash-preview
+    gemini-3-pro-preview
+```
+
+### 4. Database Configuration (Optional)
+
 ```
 --- PostgreSQL Configuration ---
 ? Host: localhost
 ? Port: 5432
 ? Username: postgres
-? Password: [HIDDEN]
+? Password: postgres
+? Database Name: my-app
+```
+
+Use `--skip-db` to skip this step for static sites.
+
+### 5. Describe Your App
+
+```
+? What do you want to build or modify?
+> Build a todo app with user authentication and task categories
 ```
 
 The agent will:
-- Verify the connection
-- Create the database if it does not exist
-- Handle schema setup when required
+- 📝 Create an implementation plan
+- ✅ Execute tasks step by step
+- 🔍 Verify builds and runtime
+- 🔧 Auto-fix errors when possible
 
 ---
 
-### 4. Define Your Goal
+## 🗂️ Project Structure
 
-Describe what you want to build using natural language.
+After the agent runs, your project will have:
+
 ```
-? What do you want to build or modify?
-> Build inventory management for a mobile shop with POS and user management
+my-app/
+├── .agent/
+│   ├── plan1.md              # Implementation plan
+│   └── task1.md              # Task checklist
+├── src/
+│   ├── app/                  # Next.js app router
+│   ├── components/           # React components
+│   └── lib/                  # Utilities
+├── prisma/                   # Database schema (if using DB)
+├── package.json
+└── ...
 ```
 
-The agent will then:
-- Generate an implementation plan (plan.md)
-- Generate a task checklist (task.md)
-- Execute tasks step by step
-- Verify builds and runtime behavior
-- Attempt fixes if errors occur
+---
+
+## ⚙️ Configuration
+
+### API Key Storage
+
+API keys are stored securely at:
+- **Windows**: `C:\Users\<User>\.nextjs-agent-cli\cred.json`
+- **macOS/Linux**: `~/.nextjs-agent-cli/cred.json`
+
+### Environment Variables
+
+You can also set your API key via environment variable:
+
+```bash
+export GEMINI_API_KEY=your_api_key_here
+```
+
+Priority: Environment variable > Credential store > Interactive prompt
 
 ---
 
-## Testing and Verification
+## 🧪 After Generation
 
-Verification is a core part of the agent’s workflow.
-
-During execution, the agent may:
-- Run dependency installs
-- Run builds
-- Detect runtime or build failures
-- Attempt automated fixes
-- Re-run verification steps
-
-If a failure requires a business or architectural decision, the agent will pause and request manual input instead of guessing.
-
----
-
-## Manual Testing (Optional)
-
-After the agent finishes, you can manually verify the generated project:
+Once the agent finishes, run your project:
 
 ```bash
 cd my-app
 npm run dev
 ```
 
-Open the browser at:
+Open http://localhost:3000 in your browser.
+
+---
+
+## 🛠️ Development
+
+### Clone and Build
+
+```bash
+git clone https://github.com/kywthiha/nextjs-agent-cli.git
+cd nextjs-agent-cli
+npm install
+npm run build
 ```
-http://localhost:3000
+
+### Run Locally
+
+```bash
+npm run dev
 ```
 
 ---
 
-## Limitations
+## 📝 Examples
 
-- Some runtime issues require human decisions
-- Complex architecture changes may need guidance
-- The agent prioritizes safety and correctness over aggressive automation
+### Create a Todo App
 
-These constraints are intentional.
+```bash
+next-agent start -n my-todo-app
+# Then enter: "Build a todo app with categories and due dates"
+```
+
+### Create an E-commerce Site
+
+```bash
+next-agent start -n my-shop
+# Then enter: "Build a product catalog with shopping cart and checkout"
+```
+
+### Static Landing Page (No Database)
+
+```bash
+next-agent start -n landing --skip-db
+# Then enter: "Build a modern landing page for a SaaS product"
+```
 
 ---
 
-## License
+## ⚠️ Limitations
+
+- Complex architecture decisions may need guidance
+- Some runtime issues require manual intervention
+- The agent prioritizes safety over aggressive automation
+
+---
+
+## 📄 License
 
 MIT License
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+---
+
+**Made with ❤️ for the Gemini 3 Hackathon 2026**
