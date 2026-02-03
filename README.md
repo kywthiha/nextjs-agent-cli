@@ -26,6 +26,29 @@
 - **Gemini API Key** - Get one from [Google AI Studio](https://aistudio.google.com/)
 - **PostgreSQL** (optional) - Only if your project uses a database
 
+### Search Tools (Recommended)
+
+For enhanced code search capabilities, install these CLI tools:
+
+| Tool | Description | Install Guide |
+| ---- | ----------- | ------------- |
+| **ripgrep (rg)** | Fast regex search | [Installation Guide](https://github.com/BurntSushi/ripgrep#installation) |
+| **fd** | Fast file finder | [Installation Guide](https://github.com/sharkdp/fd#installation) |
+
+**Quick Install:**
+
+```bash
+# Windows (winget)
+winget install BurntSushi.ripgrep.MSVC
+winget install sharkdp.fd
+
+# macOS (Homebrew)
+brew install ripgrep fd
+
+# Ubuntu/Debian
+sudo apt install ripgrep fd-find
+```
+
 ---
 
 ## 🚀 Quick Start
