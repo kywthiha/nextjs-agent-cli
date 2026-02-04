@@ -272,4 +272,19 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ---
 
+## 🎬 Demo
+
+### 📦 Inventory & POS Application
+
+- **GitHub**: [https://github.com/kywthiha/my-inv-pos](https://github.com/kywthiha/my-inv-pos)
+- **Live Demo**: [https://my-inv-pos.vercel.app/](https://my-inv-pos.vercel.app/)
+
+### Demo Video
+
+[![YouTube Demo](https://img.shields.io/badge/YouTube-Demo-red?style=for-the-badge&logo=youtube)](https://youtu.be/I-c4XH_nCEM)
+
+▶️ [Watch the Demo on YouTube](https://youtu.be/I-c4XH_nCEM)
+
+---
+
 **Made with ❤️ for the Gemini 3 Hackathon 2026**
