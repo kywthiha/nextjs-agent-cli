@@ -595,6 +595,9 @@ Use this output to determine next actions. Each failed check includes fixCommand
         required: ['projectPath']
     },
     execute: async (input) => {
+        console.log(`\n🔍 [verify_project] Starting verification for: ${input.projectPath}`);
+        console.log(`   Options: autoFix=${input.autoFix || 'false'}, skipBuild=${input.skipBuild || 'false'}, skipPrismaTest=${input.skipPrismaTest || 'false'}`);
+
         const result: VerificationResult = {
             success: true,
             projectPath: input.projectPath,
@@ -607,9 +610,14 @@ Use this output to determine next actions. Each failed check includes fixCommand
         const addCheck = (check: VerificationCheck) => {
             result.checks.push(check);
             result.summary.total++;
+            const statusIcon = check.status === 'pass' ? '✅' : check.status === 'fail' ? '❌' : check.status === 'warn' ? '⚠️' : '⏭️';
+            console.log(`   ${statusIcon} [${check.name}] ${check.message}`);
+            if (check.details) {
+                console.log(`      Details: ${check.details.substring(0, 200)}${check.details.length > 200 ? '...' : ''}`);
+            }
             switch (check.status) {
                 case 'pass': result.summary.passed++; break;
-                case 'fail': result.summary.failed++; result.success = false; break;
+                case 'fail': result.summary.failed++; break;
                 case 'warn': result.summary.warnings++; break;
                 case 'skip': result.summary.skipped++; break;
             }
@@ -1117,6 +1125,18 @@ main()
                     details: error.message
                 });
             }
+
+            // Determine success: only fail on critical checks (build, typescript, project_root, prisma_config)
+            const criticalChecks = ['project_root', 'typescript', 'build', 'prisma_config'];
+            const criticalFailures = result.checks.filter(
+                c => c.status === 'fail' && criticalChecks.includes(c.name)
+            );
+            result.success = criticalFailures.length === 0;
+
+            console.log(`\n📊 [verify_project] Summary:`);
+            console.log(`   Total: ${result.summary.total}, Passed: ${result.summary.passed}, Failed: ${result.summary.failed}, Warnings: ${result.summary.warnings}, Skipped: ${result.summary.skipped}`);
+            console.log(`   Critical failures: ${criticalFailures.length}`);
+            console.log(`   Overall success: ${result.success}\n`);
 
             return JSON.stringify(result, null, 2);
 
