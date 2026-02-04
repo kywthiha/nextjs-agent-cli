@@ -106,42 +106,60 @@ export class Agent {
     private async executeTaskLoop(contextId: string): Promise<void> {
         let iteration = 0;
         let isComplete = false;
+        let consecutiveEmptyResponses = 0;
         const maxIterations = this.config.maxIterations;
+        const MAX_EMPTY_RESPONSES = 3;
 
         while (!isComplete && iteration < maxIterations) {
             iteration++;
             logger.step(`[${contextId}] Iteration ${iteration}/${maxIterations}`);
 
-            // Check and compress conversation if needed
             await this.checkAndCompressConversation();
 
             try {
                 const response = await this.callAIWithRetry();
-
-                // Track actual token usage from SDK response
                 this.updateTokenCount(response);
 
-                const { text, toolCalls, functionResponseParts } = this.parseResponse(response);
-                if (text) {
-                    logger.dim('AI: ' + text.substring(0, 200) + (text.length > 200 ? '...' : ''));
+                const finishReason = response.candidates?.[0]?.finishReason;
 
-                    // Check for completion signal
-                    if (text.includes('TASK COMPLETE')) {
-                        logger.success(`[${contextId}] Task Complete!`);
+                const { text, toolCalls, functionResponseParts } = this.parseResponse(response);
+
+                // Handle empty response
+                if (!text && toolCalls.length === 0) {
+                    consecutiveEmptyResponses++;
+                    logger.warn(`Empty response (${consecutiveEmptyResponses}/${MAX_EMPTY_RESPONSES})`);
+
+                    if (consecutiveEmptyResponses >= MAX_EMPTY_RESPONSES) {
+                        logger.info(`[${contextId}] Stopping after ${MAX_EMPTY_RESPONSES} consecutive empty responses`);
+                        isComplete = true;
+                        continue;
+                    }
+                    continue;
+                }
+
+                consecutiveEmptyResponses = 0;
+
+                if (text) {
+                    logger.dim('AI: ' + text.substring(0, 300) + (text.length > 300 ? '...' : ''));
+
+                    if (text.toUpperCase().includes('TASK COMPLETE')) {
+                        logger.success(`[${contextId}] Task Complete signal detected!`);
                         isComplete = true;
                         continue;
                     }
                 }
 
+                // No tool calls = model finished or needs more info
                 if (toolCalls.length === 0) {
-                    if (!text) {
-                        logger.warn('No response from AI, retrying...');
+                    if (finishReason === 'STOP') {
+                        logger.success(`[${contextId}] Task Complete signal detected!`);
+                        isComplete = true;
                         continue;
                     }
-                    // AI just responded with text, ask it to continue
+
                     this.conversation.push({
                         role: 'user',
-                        parts: [{ text: 'Continue with the task. Use tools as needed.' }]
+                        parts: [{ text: 'Continue with the task. Use tools as needed. When finished, say "TASK COMPLETE".' }]
                     });
                     continue;
                 }
